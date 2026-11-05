@@ -1,0 +1,37 @@
+{
+  "name": "ig-cleanup",
+  "version": "0.1.0",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@tailwindcss/vite": "^4.3.4",
+    "bits-ui": "^2.20.6",
+    "clsx": "^2.1.1",
+    "idb": "^8.0.4",
+    "jszip": "^3.10.2",
+    "svelte": "^5.57.3",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.4",
+    "vite": "^6.4.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.5",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/chrome": "^0.0.300",
+    "@types/node": "^22.20.5",
+    "svelte-check": "^4.7.8",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

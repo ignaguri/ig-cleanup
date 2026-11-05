@@ -1,0 +1,46 @@
+@import 'tailwindcss';
+
+:root {
+  --color-bg: #0f1115;
+  --color-surface: #1a1d24;
+  --color-text: #f2f3f5;
+  --color-muted: #8b919c;
+  --color-keep: #2ecc71;
+  --color-cut: #e5484d;
+  --color-warn: #f5a524;
+
+  --radius-card: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-text: var(--color-text);
+  --color-muted: var(--color-muted);
+  --color-keep: var(--color-keep);
+  --color-cut: var(--color-cut);
+  --color-warn: var(--color-warn);
+  --radius-card: var(--radius-card);
+  --spacing-1: var(--space-1);
+  --spacing-2: var(--space-2);
+  --spacing-3: var(--space-3);
+  --spacing-4: var(--space-4);
+  --spacing-5: var(--space-5);
+  --spacing-6: var(--space-6);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+}

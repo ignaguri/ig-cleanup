@@ -1,0 +1,27 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "chrome",
+      "node"
+    ]
+  },
+  "include": [
+    "src/**/*",
+    "src/**/*.svelte",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
+}
