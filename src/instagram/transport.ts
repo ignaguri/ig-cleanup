@@ -1,7 +1,7 @@
 import { IgRetryableError } from './errors';
+import { ensureRelayTab } from './relay-tab';
 
 const IG_ORIGIN = 'https://www.instagram.com';
-const IG_APP_ID = '936619743392459';
 
 export type IgRequest = {
   method: 'GET' | 'POST';
@@ -24,25 +24,13 @@ export async function readSession(): Promise<{ userId: string; csrfToken: string
 }
 
 export async function igFetch(req: IgRequest): Promise<IgRawResponse> {
-  const session = await readSession();
-  const queryString = req.query ? `?${new URLSearchParams(req.query).toString()}` : '';
-  const headers: Record<string, string> = {
-    'X-IG-App-ID': IG_APP_ID,
-    'X-CSRFToken': session?.csrfToken ?? '',
-    'X-Requested-With': 'XMLHttpRequest',
-  };
-  if (req.method === 'POST') {
-    headers['Content-Type'] = 'application/x-www-form-urlencoded';
-  }
-
   try {
-    const response = await fetch(`${IG_ORIGIN}${req.path}${queryString}`, {
-      method: req.method,
-      credentials: 'include',
-      headers,
-      body: req.method === 'POST' ? new URLSearchParams(req.form ?? {}) : undefined,
-    });
-    return { status: response.status, url: response.url, text: await response.text() };
+    const tabId = await ensureRelayTab();
+    const reply = await chrome.tabs.sendMessage(tabId, { type: 'igc:fetch', req });
+    if (!reply || 'networkError' in reply) {
+      throw new Error(reply?.networkError ?? 'No reply from relay tab');
+    }
+    return reply as IgRawResponse;
   } catch (error) {
     throw new IgRetryableError(error instanceof Error ? error.message : 'Network failure');
   }

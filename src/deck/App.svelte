@@ -50,7 +50,7 @@ function format(result: SpikeResult | null) {
 
 async function copyResults() {
   await navigator.clipboard.writeText(
-    `Transport: Option 1: direct fetch\n\n${format(getResult)}\n\n${format(postResult)}`,
+    `Transport: Option 2: pinned-tab relay\n\n${format(getResult)}\n\n${format(postResult)}`,
   );
 }
 </script>
@@ -60,7 +60,7 @@ async function copyResults() {
 
   <section class="mt-4 space-y-2">
     <h2 class="text-lg">Spike (temporary)</h2>
-    <p>Transport: Option 1: direct fetch</p>
+    <p>Transport: Option 2: pinned-tab relay</p>
     <div class="flex gap-2">
       <button class="border px-2 py-1" onclick={runGet}>GET</button>
       <button class="border px-2 py-1" onclick={runPost}>POST</button>
