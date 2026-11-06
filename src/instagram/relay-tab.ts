@@ -1,21 +1,38 @@
 const IG_URL = 'https://www.instagram.com/';
 
 function waitForLoad(tabId: number): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+    };
     const onUpdated = (updatedTabId: number, changeInfo: { status?: string }) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(onUpdated);
+        cleanup();
         resolve();
       }
     };
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    // Covers the tab finishing between the first status read and the listener attaching.
-    chrome.tabs.get(tabId).then((tab) => {
-      if (tab.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        resolve();
+    const onRemoved = (removedTabId: number) => {
+      if (removedTabId === tabId) {
+        cleanup();
+        reject(new Error('Relay tab was closed while loading'));
       }
-    });
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    // Covers the tab finishing between the first status read and the listener attaching.
+    chrome.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab.status === 'complete') {
+          cleanup();
+          resolve();
+        }
+      })
+      .catch((error: unknown) => {
+        cleanup();
+        reject(error);
+      });
   });
 }
 

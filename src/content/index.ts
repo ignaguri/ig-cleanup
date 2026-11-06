@@ -9,7 +9,7 @@ function readCsrfToken(): string {
 
 // Instagram rejects POSTs without these page tokens (it answers with HTML).
 function readPageTokens(): { fb_dtsg: string; jazoest: string } | null {
-  const html = document.documentElement.innerHTML;
+  const html = Array.from(document.scripts, (script) => script.textContent ?? '').join('\n');
   const dtsg = html.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/)?.[1];
   if (!dtsg) {
     return null;
@@ -27,22 +27,22 @@ function computeJazoest(dtsg: string): string {
 }
 
 async function performFetch(req: IgRequest) {
-  const queryString = req.query ? `?${new URLSearchParams(req.query).toString()}` : '';
-  const headers: Record<string, string> = {
-    'X-IG-App-ID': IG_APP_ID,
-    'X-CSRFToken': readCsrfToken(),
-    'X-Requested-With': 'XMLHttpRequest',
-  };
-  let body: URLSearchParams | undefined;
-  if (req.method === 'POST') {
-    const tokens = readPageTokens();
-    if (!tokens) {
-      return { networkError: 'Page tokens not found; reload the instagram.com tab' };
-    }
-    headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    body = new URLSearchParams({ ...(req.form ?? {}), ...tokens });
-  }
   try {
+    const queryString = req.query ? `?${new URLSearchParams(req.query).toString()}` : '';
+    const headers: Record<string, string> = {
+      'X-IG-App-ID': IG_APP_ID,
+      'X-CSRFToken': readCsrfToken(),
+      'X-Requested-With': 'XMLHttpRequest',
+    };
+    let body: URLSearchParams | undefined;
+    if (req.method === 'POST') {
+      const tokens = readPageTokens();
+      if (!tokens) {
+        return { tokenError: 'Page tokens not found; reload the instagram.com tab' };
+      }
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      body = new URLSearchParams({ ...(req.form ?? {}), ...tokens });
+    }
     const response = await fetch(`${req.path}${queryString}`, {
       method: req.method,
       credentials: 'include',

@@ -1,4 +1,4 @@
-import { IgRetryableError } from './errors';
+import { IgRetryableError, IgShapeError } from './errors';
 import { ensureRelayTab } from './relay-tab';
 
 const IG_ORIGIN = 'https://www.instagram.com';
@@ -36,15 +36,25 @@ async function sendToRelay(tabId: number, message: unknown) {
   }
 }
 
+type RelayReply = IgRawResponse | { networkError: string } | { tokenError: string } | undefined;
+
 export async function igFetch(req: IgRequest): Promise<IgRawResponse> {
+  let reply: RelayReply;
   try {
     const tabId = await ensureRelayTab();
-    const reply = await sendToRelay(tabId, { type: 'igc:fetch', req });
-    if (!reply || 'networkError' in reply) {
-      throw new Error(reply?.networkError ?? 'No reply from relay tab');
-    }
-    return reply as IgRawResponse;
+    reply = await sendToRelay(tabId, { type: 'igc:fetch', req });
   } catch (error) {
     throw new IgRetryableError(error instanceof Error ? error.message : 'Network failure');
   }
+  if (!reply) {
+    throw new IgRetryableError('No reply from relay tab');
+  }
+  if ('networkError' in reply) {
+    throw new IgRetryableError(reply.networkError);
+  }
+  // Not transient: the page lost its tokens (logged out or not an instagram page).
+  if ('tokenError' in reply) {
+    throw new IgShapeError(req.path, reply.tokenError);
+  }
+  return reply;
 }
