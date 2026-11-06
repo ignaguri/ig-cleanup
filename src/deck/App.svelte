@@ -136,7 +136,8 @@ async function handleRefreshPictures() {
       followers: INITIAL_COLLECTION.followers,
       following: INITIAL_COLLECTION.following,
       refreshingPictures: true,
-      modeBeforeRefresh: currentMode,
+      // The loop ends with the refresh, so never come back to 'collecting' without a running loop.
+      modeBeforeRefresh: currentMode === 'collecting' ? 'paused' : currentMode,
     });
     await setMode('collecting');
     startCollecting();
