@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CollectionState, Person } from '../shared/types';
-import { collectionProgress, INITIAL_COLLECTION, nextListStep, nextMutualsTarget } from './collection';
+import { collectionProgress, INITIAL_COLLECTION, nextListStep, nextMutualsTarget, skipsMutuals429 } from './collection';
 
 function person(overrides: Partial<Person> = {}): Person {
   return {
@@ -81,5 +81,24 @@ describe('collectionProgress', () => {
       mutualsTotal: 2,
     });
     expect(collectionProgress({ ...listsDone, mutualsCompletedAt: 5 }, people).phase).toBe('done');
+  });
+});
+
+describe('skipsMutuals429', () => {
+  const mutualsOf = (pk: string, status: number) => ({
+    endpoint: `/api/v1/friendships/${pk}/mutual_followers/`,
+    status,
+  });
+
+  it('skips the person when the previous request went through', () => {
+    expect(skipsMutuals429('1', mutualsOf('2', 200))).toBe(true);
+  });
+
+  it('skips the person when their own retry hits 429 again', () => {
+    expect(skipsMutuals429('1', mutualsOf('1', 429))).toBe(true);
+  });
+
+  it('blocks when a different person also got 429', () => {
+    expect(skipsMutuals429('1', mutualsOf('2', 429))).toBe(false);
   });
 });

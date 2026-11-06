@@ -30,6 +30,9 @@ const relationship = $derived(
 const mutualsLine = $derived.by(() => {
   const mutuals = person.mutuals;
   if (mutuals === null) {
+    if (person.mutualsFetchedAt !== null) {
+      return 'People in common: unavailable';
+    }
     return 'People in common: loading later';
   }
   if (mutuals.usernames.length === 0) {

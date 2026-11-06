@@ -55,3 +55,17 @@ export function collectionProgress(
     mutualsTotal: inDecks.length,
   };
 }
+
+const MUTUALS_PATH = /^\/api\/v1\/friendships\/(\d+)\/mutual_followers\/$/;
+
+// A 429 on one person's mutuals skips them, unless the request before it was a 429 on a different person.
+export function skipsMutuals429(
+  targetPk: string,
+  previous: { endpoint: string; status: number | null } | undefined,
+): boolean {
+  if (previous === undefined || previous.status !== 429) {
+    return true;
+  }
+  const previousPk = MUTUALS_PATH.exec(previous.endpoint)?.[1];
+  return previousPk === undefined || previousPk === targetPk;
+}

@@ -1,10 +1,10 @@
-import { INITIAL_COLLECTION, nextListStep, nextMutualsTarget } from '../core/collection';
+import { INITIAL_COLLECTION, nextListStep, nextMutualsTarget, skipsMutuals429 } from '../core/collection';
 import { randomDelay } from '../core/pacing';
 import { mergeListPage } from '../core/people';
-import { actionsByStatus, allPeople, getMeta, putPeople, setMeta } from '../db/db';
+import { actionsByStatus, allPeople, getMeta, mergePeople, recentRequests, setMeta } from '../db/db';
 import { kick } from '../deck/lib/decide';
 import { fetchFollowersPage, fetchFollowingPage, fetchMutuals, sessionBlock } from '../instagram/client';
-import { IgBlockedError, IgRetryableError, IgShapeError } from '../instagram/errors';
+import { blockFromError, IgBlockedError, IgNotFoundError, IgRetryableError, IgShapeError } from '../instagram/errors';
 import { readSession } from '../instagram/transport';
 import {
   LIST_DELAY_MS,
@@ -16,7 +16,7 @@ import {
   MUTUALS_DELAY_MS,
 } from '../shared/constants';
 import { log } from '../shared/log';
-import type { AccountMeta, BlockInfo, CollectionState, Mode, Person } from '../shared/types';
+import type { AccountMeta, BlockInfo, CollectionState, Mode, MutualPreview } from '../shared/types';
 
 export type CollectorHandle = { stop(): Promise<void> };
 
@@ -28,6 +28,9 @@ class CursorStalledError extends Error {
     this.name = 'CursorStalledError';
   }
 }
+
+// Long enough for a send already claimed before the switch to collecting to finish (relay timeout is 45 s).
+const SEND_SETTLE_MS = 50000;
 
 let activeRun: CollectorRun | null = null;
 
@@ -84,31 +87,22 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
     onUpdate();
   }
 
-  function blockFromError(error: unknown, stepLabel: string): BlockInfo {
+  function collectorBlock(error: unknown, stepLabel: string): BlockInfo {
     const at = Date.now();
-    if (error instanceof IgBlockedError) {
-      return error.info;
-    }
-    if (error instanceof IgShapeError) {
-      return {
-        reason: 'non_json',
-        status: error.status ?? 0,
-        endpoint: error.endpoint,
-        excerpt: (error.excerpt ?? error.message).slice(0, 200),
-        at,
-      };
-    }
     if (error instanceof CursorStalledError) {
       return { reason: 'non_json', status: 0, endpoint: error.endpoint, excerpt: error.message, at };
     }
-    log.error('collector failed', error);
-    return {
-      reason: 'non_json',
-      status: 0,
-      endpoint: stepLabel,
-      excerpt: `Unexpected: ${error instanceof Error ? error.message : String(error)}`,
-      at,
-    };
+    if (!(error instanceof IgBlockedError || error instanceof IgShapeError)) {
+      log.error('collector failed', error);
+    }
+    return blockFromError(error, stepLabel, at);
+  }
+
+  async function finishRefresh(collection: CollectionState): Promise<void> {
+    await setMeta(META_COLLECTION, { ...collection, refreshingPictures: false, modeBeforeRefresh: null });
+    await setMeta<Mode>(META_MODE, collection.modeBeforeRefresh ?? 'paused');
+    kick();
+    onUpdate();
   }
 
   async function run(): Promise<void> {
@@ -118,7 +112,13 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
       if (stopped) {
         return;
       }
-      const peopleByPk = new Map<string, Person>((await allPeople()).map((p) => [p.pk, p]));
+      // A send claimed just before the switch to collecting may still be in flight: never overlap with it.
+      for (let waited = 0; waited < SEND_SETTLE_MS && (await actionsByStatus('sending')).length > 0; waited += 1000) {
+        await sleep(1000);
+      }
+      if (stopped) {
+        return;
+      }
       let collection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
 
       if ((await getMeta<AccountMeta>(META_ACCOUNT)) === undefined) {
@@ -154,12 +154,7 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
         const listStep = nextListStep(collection);
 
         if (collection.refreshingPictures && listStep === null) {
-          const restoredMode = collection.modeBeforeRefresh ?? 'paused';
-          collection = { ...collection, refreshingPictures: false, modeBeforeRefresh: null };
-          await setMeta(META_COLLECTION, collection);
-          await setMeta<Mode>(META_MODE, restoredMode);
-          kick();
-          onUpdate();
+          await finishRefresh(collection);
           return;
         }
 
@@ -175,24 +170,17 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
             if (page.nextMaxId !== null && page.nextMaxId === cursor.nextMaxId) {
               throw new CursorStalledError(listStep);
             }
+            // Merged onto the stored records, so decisions made meanwhile survive.
+            const pagePks = page.users.map((user) => user.pk);
             if (collection.refreshingPictures) {
-              const refreshed: Person[] = [];
-              for (const user of page.users) {
-                const known = peopleByPk.get(user.pk);
-                if (known) {
-                  refreshed.push({ ...known, picUrl: user.picUrl });
-                }
-              }
-              await putPeople(refreshed);
-              for (const p of refreshed) {
-                peopleByPk.set(p.pk, p);
-              }
+              await mergePeople(pagePks, (current) =>
+                page.users.flatMap((user) => {
+                  const known = current.get(user.pk);
+                  return known ? [{ ...known, picUrl: user.picUrl }] : [];
+                }),
+              );
             } else {
-              const touched = mergeListPage(peopleByPk, page.users, listStep, cursor.seen);
-              await putPeople(touched);
-              for (const p of touched) {
-                peopleByPk.set(p.pk, p);
-              }
+              await mergePeople(pagePks, (current) => mergeListPage(current, page.users, listStep, cursor.seen));
             }
             const updatedCursor = {
               done: page.nextMaxId === null,
@@ -204,17 +192,12 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
               collection = { ...collection, listsCompletedAt: Date.now() };
             }
             if (collection.refreshingPictures && nextListStep(collection) === null) {
-              const restoredMode = collection.modeBeforeRefresh ?? 'paused';
-              collection = { ...collection, refreshingPictures: false, modeBeforeRefresh: null };
-              await setMeta(META_COLLECTION, collection);
-              await setMeta<Mode>(META_MODE, restoredMode);
-              kick();
-              onUpdate();
+              await finishRefresh(collection);
               return;
             }
           } else {
-            const sentPks = new Set((await actionsByStatus('sent')).map((a) => a.personPk));
-            const target = nextMutualsTarget([...peopleByPk.values()], sentPks);
+            const sentPks = new Set((await actionsByStatus('sent')).map((action) => action.personPk));
+            const target = nextMutualsTarget(await allPeople(), sentPks);
             if (target === null) {
               collection = { ...collection, mutualsCompletedAt: Date.now() };
               await setMeta(META_COLLECTION, collection);
@@ -224,13 +207,33 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
               return;
             }
             delayRange = MUTUALS_DELAY_MS;
-            const preview = await fetchMutuals(target.pk);
+            let preview: MutualPreview | null;
+            try {
+              preview = await fetchMutuals(target.pk);
+            } catch (error) {
+              if (error instanceof IgNotFoundError) {
+                log.warn('account not found, skipping its people in common', target.pk);
+                preview = null;
+              } else if (!(error instanceof IgBlockedError) || error.info.status !== 429) {
+                throw error;
+              } else {
+                // recentRequests is newest first: [0] is this 429, [1] the request before it.
+                const previous = (await recentRequests())[1];
+                if (!skipsMutuals429(target.pk, previous)) {
+                  throw error;
+                }
+                log.warn('mutuals unavailable for one person, skipping', target.pk);
+                preview = null;
+              }
+            }
             if (stopped) {
               return;
             }
-            const updated = { ...target, mutuals: preview, mutualsFetchedAt: Date.now() };
-            await putPeople([updated]);
-            peopleByPk.set(updated.pk, updated);
+            const fetchedAt = Date.now();
+            await mergePeople([target.pk], (current) => {
+              const latest = current.get(target.pk);
+              return latest ? [{ ...latest, mutuals: preview, mutualsFetchedAt: fetchedAt }] : [];
+            });
           }
           await setMeta(META_COLLECTION, collection);
           attempts = 0;
@@ -261,7 +264,7 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
       if (stopped && !(error instanceof IgBlockedError)) {
         return;
       }
-      await block(blockFromError(error, stepLabel));
+      await block(collectorBlock(error, stepLabel));
     } finally {
       release();
     }
