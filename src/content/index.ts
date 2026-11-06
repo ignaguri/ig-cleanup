@@ -7,20 +7,19 @@ function readCsrfToken(): string {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
-// Instagram rejects POSTs without these page tokens (it answers with HTML).
-function readPageTokens(): { fb_dtsg: string; jazoest: string } | null {
-  const html = Array.from(document.scripts, (script) => script.textContent ?? '').join('\n');
-  const dtsg = html.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/)?.[1];
-  if (!dtsg) {
+// Instagram rejects POSTs without these (it answers with HTML). API POSTs derive jazoest from the csrftoken.
+function readPageTokens(csrfToken: string): { fb_dtsg: string; jazoest: string } | null {
+  const scriptsText = Array.from(document.scripts, (script) => script.textContent ?? '').join('\n');
+  const dtsg = scriptsText.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/)?.[1];
+  if (!dtsg || !csrfToken) {
     return null;
   }
-  const jazoest = html.match(/jazoest=(\d+)/)?.[1] ?? computeJazoest(dtsg);
-  return { fb_dtsg: dtsg, jazoest };
+  return { fb_dtsg: dtsg, jazoest: computeJazoest(csrfToken) };
 }
 
-function computeJazoest(dtsg: string): string {
+function computeJazoest(seed: string): string {
   let sum = 0;
-  for (const char of dtsg) {
+  for (const char of seed) {
     sum += char.charCodeAt(0);
   }
   return `2${sum}`;
@@ -29,19 +28,20 @@ function computeJazoest(dtsg: string): string {
 async function performFetch(req: IgRequest) {
   try {
     const queryString = req.query ? `?${new URLSearchParams(req.query).toString()}` : '';
+    const csrfToken = readCsrfToken();
     const headers: Record<string, string> = {
       'X-IG-App-ID': IG_APP_ID,
-      'X-CSRFToken': readCsrfToken(),
+      'X-CSRFToken': csrfToken,
       'X-Requested-With': 'XMLHttpRequest',
     };
     let body: URLSearchParams | undefined;
     if (req.method === 'POST') {
-      const tokens = readPageTokens();
+      const tokens = readPageTokens(csrfToken);
       if (!tokens) {
         return { tokenError: 'Page tokens not found; reload the instagram.com tab' };
       }
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      body = new URLSearchParams({ ...(req.form ?? {}), ...tokens });
+      body = new URLSearchParams({ ...(req.form ?? {}), jazoest: tokens.jazoest, fb_dtsg: tokens.fb_dtsg });
     }
     const response = await fetch(`${req.path}${queryString}`, {
       method: req.method,

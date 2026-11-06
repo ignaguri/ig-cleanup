@@ -6,7 +6,7 @@
 
 The deck tab asks the content script in a pinned instagram.com tab to make the call, so it's a same-origin fetch from the page. The service worker injects `content.js` if the tab has none (tabs opened before an extension reload).
 
-POSTs also need the page tokens `fb_dtsg` (from `DTSGInitialData` in the page HTML) and `jazoest`. The content script reads them right before each POST and adds them to the form body. They're never stored or logged. GETs don't use them. Approved by Ignacio on 2026-11-06.
+POSTs also need the page tokens `fb_dtsg` (from `DTSGInitialData` in the page HTML) and `jazoest` (`"2"` + the sum of the csrftoken's char codes, as the site computes it for API POSTs). The content script reads them right before each POST and adds them to the form body. They're never stored or logged. GETs don't use them. Approved by Ignacio on 2026-11-06.
 
 ## Raw results
 

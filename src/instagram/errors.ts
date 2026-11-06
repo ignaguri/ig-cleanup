@@ -1,17 +1,4 @@
-export type BlockInfo = {
-  reason:
-    | 'http_429'
-    | 'feedback_required'
-    | 'checkpoint_required'
-    | 'login_required'
-    | 'login_redirect'
-    | 'challenge_redirect'
-    | 'non_json';
-  status: number;
-  endpoint: string;
-  excerpt: string;
-  at: number;
-};
+import type { BlockInfo } from '../shared/types';
 
 export class IgBlockedError extends Error {
   info: BlockInfo;

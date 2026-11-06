@@ -1,0 +1,100 @@
+{
+  "unfollow": {
+    "method": "POST",
+    "url": "https://www.instagram.com/api/v1/friendships/destroy/1000000011/",
+    "form": {
+      "container_module": "profile",
+      "nav_chain": "PolarisProfilePostsTabRoot:profilePage:1:via_cold_start",
+      "user_id": "1000000011",
+      "jazoest": "<from csrftoken>",
+      "fb_dtsg": "<from page>"
+    },
+    "status": 200,
+    "response": {
+      "friendship_status": {
+        "blocking": false,
+        "followed_by": false,
+        "following": false,
+        "incoming_request": false,
+        "is_bestie": false,
+        "is_eligible_to_subscribe": false,
+        "is_feed_favorite": false,
+        "is_private": true,
+        "is_restricted": false,
+        "muting": false,
+        "outgoing_request": false,
+        "subscribed": false
+      },
+      "status": "ok"
+    }
+  },
+  "follow": {
+    "method": "POST",
+    "url": "https://www.instagram.com/api/v1/friendships/create/1000000011/",
+    "form": {
+      "container_module": "profile",
+      "include_follow_friction_check": "true",
+      "nav_chain": "PolarisProfilePostsTabRoot:profilePage:1:via_cold_start",
+      "user_id": "1000000011",
+      "jazoest": "<from csrftoken>",
+      "fb_dtsg": "<from page>"
+    },
+    "status": 200,
+    "response": {
+      "friendship_status": {
+        "blocking": false,
+        "followed_by": false,
+        "following": false,
+        "incoming_request": false,
+        "is_bestie": false,
+        "is_eligible_to_subscribe": false,
+        "is_feed_favorite": false,
+        "is_private": true,
+        "is_restricted": false,
+        "muting": false,
+        "outgoing_request": true,
+        "subscribed": false
+      },
+      "previous_following": false,
+      "status": "ok"
+    }
+  },
+  "remove": {
+    "method": "POST",
+    "url": "https://www.instagram.com/api/v1/friendships/remove_follower/1000000010/",
+    "form": {
+      "jazoest": "<from csrftoken>",
+      "fb_dtsg": "<from page>"
+    },
+    "status": 200,
+    "response": {
+      "friendship_status": {
+        "following": false,
+        "followed_by": false,
+        "is_bestie": false,
+        "is_feed_favorite": false,
+        "is_restricted": false,
+        "outgoing_request": false,
+        "incoming_request": false,
+        "muting": false,
+        "is_muting_reel": false,
+        "blocking": false,
+        "is_messaging_only_blocking": false,
+        "is_messaging_pseudo_blocking": false,
+        "is_private": true,
+        "is_viewer_unconnected": true,
+        "is_unavailable": false,
+        "reachability_status": 0,
+        "is_group_creation_reachable": true,
+        "has_reached_invite_limit": false,
+        "is_muting_friend_map_location": false,
+        "is_eligible_to_subscribe": false,
+        "subscribed": false,
+        "is_muting_media_reposts": false,
+        "show_unknown_group_member_warning": false,
+        "is_blocking_reel": false
+      },
+      "status": "ok"
+    }
+  }
+}
