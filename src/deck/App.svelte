@@ -1,72 +1,127 @@
 <script lang="ts">
-import { type IgRawResponse, igFetch, readSession } from '../instagram/transport';
+import { onMount } from 'svelte';
+import { buildDeck, deckCounts } from '../core/people';
+import { allPeople } from '../db/db';
+import type { Decision, DeckId, Person } from '../shared/types';
+import Card from './components/Card.svelte';
+import DeckSidebar from './components/DeckSidebar.svelte';
+import QueueStatus from './components/QueueStatus.svelte';
+import { decide, undoLast } from './lib/decide';
+import { keyToCommand } from './lib/keyboard';
 
-type SpikeResult = { label: string } & Partial<IgRawResponse> & { error?: string };
+const SLIDE_OUT_MS = 150;
 
-let getResult = $state<SpikeResult | null>(null);
-let postResult = $state<SpikeResult | null>(null);
+let people = $state<Person[]>([]);
+let selectedDeck = $state<DeckId>('notFollowingBack');
+let leaving = $state(false);
+let busy = false;
+let refreshKey = $state(0);
+let undoNotes = $state<string[]>([]);
 
-async function run(label: string, send: (userId: string) => Promise<IgRawResponse>) {
+const counts = $derived(deckCounts(people));
+const current = $derived(buildDeck(people, selectedDeck)[0] ?? null);
+
+async function refresh() {
+  people = await allPeople();
+  refreshKey += 1;
+}
+
+async function handleDecide(decision: Decision) {
+  if (!current || busy) {
+    return;
+  }
+  busy = true;
+  undoNotes = [];
   try {
-    const session = await readSession();
-    if (!session) {
-      return { label, error: 'No Instagram session cookies (log in first)' };
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reducedMotion) {
+      leaving = true;
+      await new Promise((resolve) => setTimeout(resolve, SLIDE_OUT_MS));
     }
-    return { label, ...(await send(session.userId)) };
-  } catch (error) {
-    return { label, error: String(error) };
+    await decide(current.pk, decision);
+    await refresh();
+  } finally {
+    leaving = false;
+    busy = false;
   }
 }
 
-async function runGet() {
-  getResult = await run('GET followers', (userId) =>
-    igFetch({
-      method: 'GET',
-      path: `/api/v1/friendships/${userId}/followers/`,
-      query: { count: '12', search_surface: 'follow_list_page' },
-    }),
-  );
-}
-
-async function runPost() {
-  postResult = await run('POST show_many', (userId) =>
-    igFetch({
-      method: 'POST',
-      path: '/api/v1/friendships/show_many/',
-      form: { user_ids: userId },
-    }),
-  );
-}
-
-function format(result: SpikeResult | null) {
-  if (!result) {
-    return '(not run)';
+async function handleUndo() {
+  if (busy) {
+    return;
   }
-  if (result.error) {
-    return `${result.label}\nerror: ${result.error}`;
+  busy = true;
+  try {
+    const steps = await undoLast();
+    undoNotes = steps.flatMap((step) => {
+      if (step.kind === 'refollow' && step.privateAccount) {
+        return ['Follow request sent, not restored'];
+      }
+      if (step.kind === 'irreversible') {
+        return ["Removal already sent, can't undo"];
+      }
+      return [];
+    });
+    await refresh();
+  } finally {
+    busy = false;
   }
-  return `${result.label}\nstatus: ${result.status}\nurl: ${result.url}\nbody: ${(result.text ?? '').slice(0, 300)}`;
 }
 
-async function copyResults() {
-  await navigator.clipboard.writeText(
-    `Transport: Option 2: pinned-tab relay\n\n${format(getResult)}\n\n${format(postResult)}`,
-  );
+function openProfile() {
+  if (current) {
+    window.open(`https://www.instagram.com/${current.username}/`, '_blank', 'noopener');
+  }
 }
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable;
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
+    return;
+  }
+  const command = keyToCommand(event.key);
+  if (command === null) {
+    return;
+  }
+  event.preventDefault();
+  if (command === 'undo') {
+    handleUndo();
+  } else if (command === 'open') {
+    openProfile();
+  } else {
+    handleDecide(command);
+  }
+}
+
+onMount(() => {
+  refresh();
+  const intervalId = setInterval(refresh, 5000);
+  return () => clearInterval(intervalId);
+});
 </script>
 
-<main class="min-h-screen bg-bg p-4 text-text">
-  <h1 class="text-xl">Instagram Cleanup</h1>
+<svelte:window onkeydown={onKeydown} />
 
-  <section class="mt-4 space-y-2">
-    <h2 class="text-lg">Spike (temporary)</h2>
-    <p>Transport: Option 2: pinned-tab relay</p>
-    <div class="flex gap-2">
-      <button class="border px-2 py-1" onclick={runGet}>GET</button>
-      <button class="border px-2 py-1" onclick={runPost}>POST</button>
-      <button class="border px-2 py-1" onclick={copyResults}>Copy results</button>
-    </div>
-    <pre class="whitespace-pre-wrap break-all text-sm">{format(getResult)}</pre>
-    <pre class="whitespace-pre-wrap break-all text-sm">{format(postResult)}</pre>
+<main class="flex min-h-screen gap-6 bg-bg p-6 text-text">
+  <section class="flex flex-1 flex-col items-center justify-center gap-4">
+    {#if current}
+      <Card person={current} {leaving} onDecide={handleDecide} />
+    {:else}
+      <p class="text-muted">Nothing left in this deck</p>
+    {/if}
+    {#each undoNotes as note (note)}
+      <p class="text-sm text-warn">{note}</p>
+    {/each}
+    <p class="text-sm text-muted">Undo: Z or Backspace</p>
   </section>
+  <aside class="w-64 space-y-4">
+    <DeckSidebar {counts} selected={selectedDeck} onSelect={(deck) => (selectedDeck = deck)} />
+    <QueueStatus {refreshKey} />
+  </aside>
 </main>
