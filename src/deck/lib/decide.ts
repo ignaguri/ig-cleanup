@@ -1,5 +1,5 @@
 import { actionsFor, availableDecisions, planUndo, type UndoStep } from '../../core/decisions';
-import { actionsForPerson, addActions, getPerson, putPeople, updateAction } from '../../db/db';
+import { actionsForPerson, cancelIfQueued, getPerson, recordDecision } from '../../db/db';
 import { UNDO_HISTORY_SIZE } from '../../shared/constants';
 import { log } from '../../shared/log';
 import type { Decision, QueuedAction } from '../../shared/types';
@@ -29,8 +29,7 @@ export async function decide(personPk: string, decision: Decision): Promise<void
     return;
   }
   const now = Date.now();
-  await putPeople([{ ...person, decision, decidedAt: now }]);
-  const actionIds = await addActions(actionsFor(person, decision, now));
+  const actionIds = await recordDecision({ ...person, decision, decidedAt: now }, actionsFor(person, decision, now));
   history.push({ personPk, previousDecision: person.decision, actionIds });
   if (history.length > UNDO_HISTORY_SIZE) {
     history.shift();
@@ -48,19 +47,24 @@ export async function undoLast(): Promise<UndoStep[]> {
     return [];
   }
   const now = Date.now();
-  const current = await actionsForPerson(entry.personPk);
   const steps: UndoStep[] = [];
+  const refollows: QueuedAction[] = [];
   for (const actionId of entry.actionIds) {
-    const action = current.find((candidate) => candidate.id === actionId);
+    const findAction = async () =>
+      (await actionsForPerson(entry.personPk)).find((candidate) => candidate.id === actionId);
+    const action = await findAction();
     if (!action) {
       continue;
     }
-    const step = planUndo(person, action);
+    let step = planUndo(person, action);
+    if (step.kind === 'cancel' && !(await cancelIfQueued(step.actionId))) {
+      // The sender claimed it first: re-plan against the current status.
+      const latest = await findAction();
+      step = latest ? planUndo(person, latest) : { kind: 'none' };
+    }
     steps.push(step);
-    if (step.kind === 'cancel') {
-      await updateAction({ ...action, status: 'cancelled' });
-    } else if (step.kind === 'refollow') {
-      const follow: QueuedAction = {
+    if (step.kind === 'refollow') {
+      refollows.push({
         personPk: person.pk,
         type: 'follow',
         status: 'queued',
@@ -69,11 +73,10 @@ export async function undoLast(): Promise<UndoStep[]> {
         notBefore: now,
         sentAt: null,
         error: null,
-      };
-      await addActions([follow]);
+      });
     }
   }
-  await putPeople([{ ...person, decision: entry.previousDecision, decidedAt: null }]);
+  await recordDecision({ ...person, decision: entry.previousDecision, decidedAt: null }, refollows);
   kick();
   return steps;
 }

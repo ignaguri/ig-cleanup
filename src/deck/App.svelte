@@ -1,7 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import { availableDecisions } from '../core/decisions';
 import { buildDeck, deckCounts } from '../core/people';
 import { allPeople } from '../db/db';
+import { log } from '../shared/log';
 import type { Decision, DeckId, Person } from '../shared/types';
 import Card from './components/Card.svelte';
 import DeckSidebar from './components/DeckSidebar.svelte';
@@ -15,6 +17,8 @@ let people = $state<Person[]>([]);
 let selectedDeck = $state<DeckId>('notFollowingBack');
 let leaving = $state(false);
 let busy = false;
+let refreshSequence = 0;
+let errorMessage = $state('');
 let refreshKey = $state(0);
 let undoNotes = $state<string[]>([]);
 
@@ -22,16 +26,28 @@ const counts = $derived(deckCounts(people));
 const current = $derived(buildDeck(people, selectedDeck)[0] ?? null);
 
 async function refresh() {
-  people = await allPeople();
+  refreshSequence += 1;
+  const sequence = refreshSequence;
+  const loaded = await allPeople();
+  if (sequence !== refreshSequence) {
+    return;
+  }
+  people = loaded;
   refreshKey += 1;
 }
 
+function reportError(error: unknown) {
+  log.error('deck action failed', error);
+  errorMessage = error instanceof Error ? error.message : String(error);
+}
+
 async function handleDecide(decision: Decision) {
-  if (!current || busy) {
+  if (!current || busy || !availableDecisions(current).includes(decision)) {
     return;
   }
   busy = true;
   undoNotes = [];
+  errorMessage = '';
   try {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!reducedMotion) {
@@ -40,6 +56,8 @@ async function handleDecide(decision: Decision) {
     }
     await decide(current.pk, decision);
     await refresh();
+  } catch (error) {
+    reportError(error);
   } finally {
     leaving = false;
     busy = false;
@@ -51,6 +69,7 @@ async function handleUndo() {
     return;
   }
   busy = true;
+  errorMessage = '';
   try {
     const steps = await undoLast();
     undoNotes = steps.flatMap((step) => {
@@ -63,6 +82,8 @@ async function handleUndo() {
       return [];
     });
     await refresh();
+  } catch (error) {
+    reportError(error);
   } finally {
     busy = false;
   }
@@ -82,11 +103,18 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  if (event.repeat) {
+    return;
+  }
   if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
     return;
   }
   const command = keyToCommand(event.key);
   if (command === null) {
+    return;
+  }
+  const onControl = event.target instanceof HTMLButtonElement || event.target instanceof HTMLAnchorElement;
+  if (command === 'open' && onControl) {
     return;
   }
   event.preventDefault();
@@ -100,8 +128,12 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMount(() => {
-  refresh();
-  const intervalId = setInterval(refresh, 5000);
+  refresh().catch(reportError);
+  const intervalId = setInterval(() => {
+    if (!busy) {
+      refresh().catch((error) => log.warn('refresh failed', error));
+    }
+  }, 5000);
   return () => clearInterval(intervalId);
 });
 </script>
@@ -114,6 +146,9 @@ onMount(() => {
       <Card person={current} {leaving} onDecide={handleDecide} />
     {:else}
       <p class="text-muted">Nothing left in this deck</p>
+    {/if}
+    {#if errorMessage}
+      <p class="text-sm text-cut">{errorMessage}</p>
     {/if}
     {#each undoNotes as note (note)}
       <p class="text-sm text-warn">{note}</p>

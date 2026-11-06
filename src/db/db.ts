@@ -115,3 +115,39 @@ export async function wipeAll(): Promise<void> {
   const tx = db.transaction(stores, 'readwrite');
   await Promise.all([...stores.map((store) => tx.objectStore(store).clear()), tx.done]);
 }
+
+export async function cancelIfQueued(id: number): Promise<boolean> {
+  const db = await openDb();
+  const tx = db.transaction(STORE_ACTIONS, 'readwrite');
+  const action = await tx.store.get(id);
+  if (action?.status !== 'queued') {
+    await tx.done;
+    return false;
+  }
+  await Promise.all([tx.store.put({ ...action, status: 'cancelled' }), tx.done]);
+  return true;
+}
+
+export async function claimForSending(id: number): Promise<QueuedAction | null> {
+  const db = await openDb();
+  const tx = db.transaction(STORE_ACTIONS, 'readwrite');
+  const action = await tx.store.get(id);
+  if (action?.status !== 'queued') {
+    await tx.done;
+    return null;
+  }
+  const claimed: QueuedAction = { ...action, status: 'sending' };
+  await Promise.all([tx.store.put(claimed), tx.done]);
+  return claimed;
+}
+
+export async function recordDecision(person: Person, actions: QueuedAction[]): Promise<number[]> {
+  const db = await openDb();
+  const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS], 'readwrite');
+  const [, ids] = await Promise.all([
+    tx.objectStore(STORE_PEOPLE).put(person),
+    Promise.all(actions.map((action) => tx.objectStore(STORE_ACTIONS).add(action))),
+    tx.done,
+  ]);
+  return ids;
+}

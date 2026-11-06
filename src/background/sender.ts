@@ -1,5 +1,5 @@
 import { planSend, randomDelay, type SendPlan } from '../core/pacing';
-import { actionsByStatus, getMeta, setMeta, updateAction } from '../db/db';
+import { actionsByStatus, claimForSending, getMeta, setMeta, updateAction } from '../db/db';
 import { follow, removeFollower, unfollow } from '../instagram/client';
 import { IgBlockedError, IgRetryableError, IgShapeError } from '../instagram/errors';
 import {
@@ -135,8 +135,12 @@ export async function runSendTick(now: number): Promise<SendPlan> {
     return plan;
   }
 
-  const action = plan.action;
-  await updateAction({ ...action, status: 'sending' });
+  const claimed = plan.action.id === undefined ? null : await claimForSending(plan.action.id);
+  if (!claimed) {
+    // Cancelled (undo) between planning and claiming: send nothing, the next tick re-plans.
+    return plan;
+  }
+  const action = claimed;
   // Persisted before the outcome so pacing holds after failures and blocks too.
   await setMeta(META_LAST_SENT_AT, now);
   try {

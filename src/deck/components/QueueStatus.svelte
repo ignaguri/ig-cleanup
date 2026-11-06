@@ -39,11 +39,6 @@ $effect(() => {
   refreshKey;
   refresh();
 });
-
-$effect(() => {
-  const intervalId = setInterval(refresh, 5000);
-  return () => clearInterval(intervalId);
-});
 </script>
 
 <section class="space-y-1 rounded-card bg-surface p-3 text-sm">
