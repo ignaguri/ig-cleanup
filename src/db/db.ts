@@ -33,6 +33,17 @@ export function openDb(): Promise<IDBPDatabase<IgCleanupDb>> {
         db.createObjectStore(STORE_REQUEST_LOG, { keyPath: 'id', autoIncrement: true });
         db.createObjectStore(STORE_META, { keyPath: 'key' });
       },
+      // The deck tab and the service worker share the DB; let a future upgrade through.
+      blocking() {
+        void dbPromise?.then((db) => db.close());
+        dbPromise = null;
+      },
+      terminated() {
+        dbPromise = null;
+      },
+    }).catch((error: unknown) => {
+      dbPromise = null;
+      throw error;
     });
   }
   return dbPromise;

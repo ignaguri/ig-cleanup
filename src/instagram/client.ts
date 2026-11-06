@@ -1,4 +1,5 @@
-import { logRequest } from '../db/db';
+import { logRequest, type RequestLogRow } from '../db/db';
+import { log } from '../shared/log';
 import type { MutualPreview } from '../shared/types';
 import {
   followersRequest,
@@ -55,19 +56,29 @@ async function requireSession(endpoint: string): Promise<{ userId: string; csrfT
 async function send<T>(req: IgRequest, parse: (res: IgRawResponse, endpoint: string) => T): Promise<T> {
   const endpoint = req.path;
   let response: IgRawResponse | null = null;
+  let result: T;
   try {
     response = await igFetch(req);
-    const result = parse(response, endpoint);
-    await logRequest({ endpoint, status: response.status, at: Date.now(), outcome: 'ok' });
-    return result;
+    result = parse(response, endpoint);
   } catch (error) {
-    await logRequest({
+    await safeLog({
       endpoint,
       status: response?.status ?? errorStatus(error),
       at: Date.now(),
       outcome: describeError(error),
     });
     throw error;
+  }
+  await safeLog({ endpoint, status: response.status, at: Date.now(), outcome: 'ok' });
+  return result;
+}
+
+// A logging failure must never hide the Instagram outcome.
+async function safeLog(row: RequestLogRow): Promise<void> {
+  try {
+    await logRequest(row);
+  } catch (error) {
+    log.warn('request log write failed', error);
   }
 }
 
