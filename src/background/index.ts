@@ -1,6 +1,6 @@
 import { SEND_ALARM } from '../shared/constants';
 import { log } from '../shared/log';
-import { kickSender, tickAndReschedule } from './sender';
+import { kickSender, rearmFallback, tickAndReschedule } from './sender';
 
 chrome.action.onClicked.addListener(async () => {
   const deckUrl = chrome.runtime.getURL('deck.html');
@@ -24,6 +24,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await tickAndReschedule();
   } catch (error) {
     log.error('send tick failed', error);
+    try {
+      await rearmFallback();
+    } catch (rearmError) {
+      log.error('fallback alarm failed', rearmError);
+    }
   }
 });
 

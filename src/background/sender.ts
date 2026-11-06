@@ -18,6 +18,7 @@ const MIN_WAIT_MS = 30000;
 const INTERRUPTED_ERROR = 'Interrupted while sending; check on Instagram';
 
 let tickInFlight = false;
+let kickedDuringTick = false;
 
 // mulberry32: same seed gives the same gap, so the alarm lands exactly when planSend allows the send.
 export function seededRand(seed: number): () => number {
@@ -48,6 +49,20 @@ async function callClient(action: QueuedAction): Promise<void> {
     await removeFollower(action.personPk);
   } else {
     await follow(action.personPk);
+  }
+}
+
+async function recordBlock(excerpt: string, now: number): Promise<void> {
+  try {
+    await setMeta(META_BLOCK, {
+      reason: 'non_json',
+      status: 0,
+      endpoint: 'unknown',
+      excerpt,
+      at: now,
+    } satisfies BlockInfo);
+  } catch (error) {
+    log.error('could not record block', error);
   }
 }
 
@@ -126,9 +141,16 @@ export async function runSendTick(now: number): Promise<SendPlan> {
   await setMeta(META_LAST_SENT_AT, now);
   try {
     await callClient(action);
-    await updateAction({ ...action, status: 'sent', sentAt: now, error: null });
   } catch (error) {
     await handleSendError(error, action, now, settings);
+    return plan;
+  }
+  try {
+    await updateAction({ ...action, status: 'sent', sentAt: now, error: null });
+  } catch (error) {
+    // Request went out: never re-queue. The action stays 'sending' and the next tick marks it failed.
+    log.error('could not record sent action', error);
+    await recordBlock('Could not record a sent action', now);
   }
   return plan;
 }
@@ -157,15 +179,28 @@ export async function tickAndReschedule(): Promise<void> {
     const block = await getMeta<BlockInfo | null>(META_BLOCK);
     if (block) {
       await chrome.alarms.clear(SEND_ALARM);
-      return;
+    } else if (kickedDuringTick) {
+      await chrome.alarms.create(SEND_ALARM, { when: Date.now() + 1000 });
+    } else {
+      await scheduleAfter(plan, now, await loadSettings());
     }
-    await scheduleAfter(plan, now, await loadSettings());
   } finally {
     tickInFlight = false;
+    kickedDuringTick = false;
+  }
+}
+
+export async function rearmFallback(): Promise<void> {
+  const block = await getMeta<BlockInfo | null>(META_BLOCK);
+  if (!block) {
+    await chrome.alarms.create(SEND_ALARM, { when: Date.now() + MIN_WAIT_MS });
   }
 }
 
 export async function kickSender(): Promise<void> {
+  if (tickInFlight) {
+    kickedDuringTick = true;
+  }
   await chrome.alarms.clear(SEND_ALARM);
   await chrome.alarms.create(SEND_ALARM, { when: Date.now() + 1000 });
 }
