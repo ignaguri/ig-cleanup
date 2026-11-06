@@ -1,0 +1,171 @@
+import { planSend, randomDelay, type SendPlan } from '../core/pacing';
+import { actionsByStatus, getMeta, setMeta, updateAction } from '../db/db';
+import { follow, removeFollower, unfollow } from '../instagram/client';
+import { IgBlockedError, IgRetryableError, IgShapeError } from '../instagram/errors';
+import {
+  DEFAULT_SETTINGS,
+  MAX_ATTEMPTS,
+  META_BLOCK,
+  META_LAST_SENT_AT,
+  META_MODE,
+  META_SETTINGS,
+  SEND_ALARM,
+} from '../shared/constants';
+import { log } from '../shared/log';
+import type { BlockInfo, Mode, QueuedAction, Settings } from '../shared/types';
+
+const MIN_WAIT_MS = 30000;
+const INTERRUPTED_ERROR = 'Interrupted while sending; check on Instagram';
+
+let tickInFlight = false;
+
+// mulberry32: same seed gives the same gap, so the alarm lands exactly when planSend allows the send.
+export function seededRand(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+async function loadSettings(): Promise<Settings> {
+  return (await getMeta<Settings>(META_SETTINGS)) ?? DEFAULT_SETTINGS;
+}
+
+async function failInterruptedSends(): Promise<void> {
+  const stuck = await actionsByStatus('sending');
+  for (const action of stuck) {
+    await updateAction({ ...action, status: 'failed', error: INTERRUPTED_ERROR });
+  }
+}
+
+async function callClient(action: QueuedAction): Promise<void> {
+  if (action.type === 'unfollow') {
+    await unfollow(action.personPk);
+  } else if (action.type === 'remove') {
+    await removeFollower(action.personPk);
+  } else {
+    await follow(action.personPk);
+  }
+}
+
+async function handleSendError(error: unknown, action: QueuedAction, now: number, settings: Settings): Promise<void> {
+  if (error instanceof IgRetryableError) {
+    const attempts = action.attempts + 1;
+    if (attempts >= MAX_ATTEMPTS) {
+      await updateAction({ ...action, status: 'failed', attempts, error: error.message });
+    } else {
+      await updateAction({
+        ...action,
+        status: 'queued',
+        attempts,
+        notBefore: now + attempts * settings.maxDelayMs,
+        error: error.message,
+      });
+    }
+    return;
+  }
+
+  let blockInfo: BlockInfo;
+  if (error instanceof IgBlockedError) {
+    blockInfo = error.info;
+  } else if (error instanceof IgShapeError) {
+    blockInfo = {
+      reason: 'non_json',
+      status: 0,
+      endpoint: error.endpoint,
+      excerpt: error.message.slice(0, 200),
+      at: now,
+    };
+  } else {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error('unexpected send error', error);
+    blockInfo = {
+      reason: 'non_json',
+      status: 0,
+      endpoint: 'unknown',
+      excerpt: `Unexpected: ${message}`.slice(0, 200),
+      at: now,
+    };
+  }
+  await setMeta(META_BLOCK, blockInfo);
+  await updateAction({ ...action, status: 'queued' });
+}
+
+export async function runSendTick(now: number): Promise<SendPlan> {
+  await failInterruptedSends();
+
+  const [mode, block, settings, lastSentAt, queued, sent] = await Promise.all([
+    getMeta<Mode>(META_MODE),
+    getMeta<BlockInfo | null>(META_BLOCK),
+    loadSettings(),
+    getMeta<number | null>(META_LAST_SENT_AT),
+    actionsByStatus('queued'),
+    actionsByStatus('sent'),
+  ]);
+
+  const plan = planSend({
+    mode: mode ?? 'paused',
+    block: block ?? null,
+    queued,
+    sent,
+    lastSentAt: lastSentAt ?? null,
+    settings,
+    now,
+    rand: seededRand(lastSentAt ?? 0),
+  });
+  if (plan.kind !== 'send') {
+    return plan;
+  }
+
+  const action = plan.action;
+  await updateAction({ ...action, status: 'sending' });
+  // Persisted before the outcome so pacing holds after failures and blocks too.
+  await setMeta(META_LAST_SENT_AT, now);
+  try {
+    await callClient(action);
+    await updateAction({ ...action, status: 'sent', sentAt: now, error: null });
+  } catch (error) {
+    await handleSendError(error, action, now, settings);
+  }
+  return plan;
+}
+
+async function scheduleAfter(plan: SendPlan, now: number, settings: Settings): Promise<void> {
+  if (plan.kind === 'send') {
+    const gapMs = randomDelay([settings.minDelayMs, settings.maxDelayMs], seededRand(now));
+    await chrome.alarms.create(SEND_ALARM, { when: now + gapMs });
+  } else if (plan.kind === 'wait') {
+    if (Number.isFinite(plan.until)) {
+      await chrome.alarms.create(SEND_ALARM, { when: Math.max(plan.until, now + MIN_WAIT_MS) });
+    }
+  } else {
+    await chrome.alarms.clear(SEND_ALARM);
+  }
+}
+
+export async function tickAndReschedule(): Promise<void> {
+  if (tickInFlight) {
+    return;
+  }
+  tickInFlight = true;
+  try {
+    const now = Date.now();
+    const plan = await runSendTick(now);
+    const block = await getMeta<BlockInfo | null>(META_BLOCK);
+    if (block) {
+      await chrome.alarms.clear(SEND_ALARM);
+      return;
+    }
+    await scheduleAfter(plan, now, await loadSettings());
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+export async function kickSender(): Promise<void> {
+  await chrome.alarms.clear(SEND_ALARM);
+  await chrome.alarms.create(SEND_ALARM, { when: Date.now() + 1000 });
+}

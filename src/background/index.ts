@@ -1,4 +1,6 @@
+import { SEND_ALARM } from '../shared/constants';
 import { log } from '../shared/log';
+import { kickSender, tickAndReschedule } from './sender';
 
 chrome.action.onClicked.addListener(async () => {
   const deckUrl = chrome.runtime.getURL('deck.html');
@@ -13,3 +15,33 @@ chrome.action.onClicked.addListener(async () => {
   log.info('opening deck');
   await chrome.tabs.create({ url: deckUrl });
 });
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== SEND_ALARM) {
+    return;
+  }
+  try {
+    await tickAndReschedule();
+  } catch (error) {
+    log.error('send tick failed', error);
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== 'igc:kick') {
+    return false;
+  }
+  kickSender()
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => {
+      log.error('kick failed', error);
+      sendResponse({ ok: false });
+    });
+  return true;
+});
+
+function kickOnLifecycle(): void {
+  kickSender().catch((error) => log.error('kick failed', error));
+}
+chrome.runtime.onStartup.addListener(kickOnLifecycle);
+chrome.runtime.onInstalled.addListener(kickOnLifecycle);
