@@ -1,8 +1,16 @@
-const IG_URL = 'https://www.instagram.com/';
+import { IG_ORIGIN } from '../shared/constants';
+
+const IG_URL = `${IG_ORIGIN}/`;
+const LOAD_TIMEOUT_MS = 45000;
 
 function waitForLoad(tabId: number): Promise<void> {
   return new Promise((resolve, reject) => {
+    const timerId = setTimeout(() => {
+      cleanup();
+      reject(new Error('Relay tab did not finish loading'));
+    }, LOAD_TIMEOUT_MS);
     const cleanup = () => {
+      clearTimeout(timerId);
       chrome.tabs.onUpdated.removeListener(onUpdated);
       chrome.tabs.onRemoved.removeListener(onRemoved);
     };
@@ -42,7 +50,11 @@ export async function ensureRelayTab(): Promise<number> {
   if (tab.id === undefined) {
     throw new Error('Relay tab has no id');
   }
-  if (tab.status !== 'complete') {
+  // A discarded tab has no running page to relay through.
+  if (tab.discarded || tab.status === 'unloaded') {
+    await chrome.tabs.reload(tab.id);
+    await waitForLoad(tab.id);
+  } else if (tab.status !== 'complete') {
     await waitForLoad(tab.id);
   }
   return tab.id;

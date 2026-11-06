@@ -3,7 +3,7 @@ import { randomDelay } from '../core/pacing';
 import { mergeListPage } from '../core/people';
 import { actionsByStatus, allPeople, getMeta, putPeople, setMeta } from '../db/db';
 import { kick } from '../deck/lib/decide';
-import { fetchFollowersPage, fetchFollowingPage, fetchMutuals } from '../instagram/client';
+import { fetchFollowersPage, fetchFollowingPage, fetchMutuals, sessionBlock } from '../instagram/client';
 import { IgBlockedError, IgRetryableError, IgShapeError } from '../instagram/errors';
 import { readSession } from '../instagram/transport';
 import {
@@ -90,7 +90,13 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
       return error.info;
     }
     if (error instanceof IgShapeError) {
-      return { reason: 'non_json', status: 0, endpoint: error.endpoint, excerpt: error.message.slice(0, 200), at };
+      return {
+        reason: 'non_json',
+        status: error.status ?? 0,
+        endpoint: error.endpoint,
+        excerpt: (error.excerpt ?? error.message).slice(0, 200),
+        at,
+      };
     }
     if (error instanceof CursorStalledError) {
       return { reason: 'non_json', status: 0, endpoint: error.endpoint, excerpt: error.message, at };
@@ -137,6 +143,11 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
         const mode = await getMeta<Mode>(META_MODE);
         const existingBlock = await getMeta<BlockInfo | null>(META_BLOCK);
         if (stopped || mode !== 'collecting' || (existingBlock ?? null) !== null) {
+          return;
+        }
+        const accountBlock = await sessionBlock(Date.now());
+        if (accountBlock) {
+          await block(accountBlock);
           return;
         }
 

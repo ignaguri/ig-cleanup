@@ -1,10 +1,10 @@
-import { planSend, randomDelay, type SendPlan } from '../core/pacing';
-import { actionsByStatus, claimForSending, getMeta, setMeta, updateAction } from '../db/db';
-import { follow, removeFollower, unfollow } from '../instagram/client';
-import { IgBlockedError, IgRetryableError, IgShapeError } from '../instagram/errors';
+import { planSend, randomDelay, type SendPlan, seededRand } from '../core/pacing';
+import { sendErrorOutcome } from '../core/send-outcome';
+import { actionsByStatus, claimForSending, getMeta, requeueIfStillWanted, setMeta, updateAction } from '../db/db';
+import { follow, removeFollower, sessionBlock, unfollow } from '../instagram/client';
+import { blockFromError, IgBlockedError, IgShapeError } from '../instagram/errors';
 import {
   DEFAULT_SETTINGS,
-  MAX_ATTEMPTS,
   META_BLOCK,
   META_LAST_SENT_AT,
   META_MODE,
@@ -19,17 +19,8 @@ const INTERRUPTED_ERROR = 'Interrupted while sending; check on Instagram';
 
 let tickInFlight = false;
 let kickedDuringTick = false;
-
-// mulberry32: same seed gives the same gap, so the alarm lands exactly when planSend allows the send.
-export function seededRand(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
-    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// Set when a block could not be persisted: stay idle until the service worker restarts.
+let blockedInMemory = false;
 
 async function loadSettings(): Promise<Settings> {
   return (await getMeta<Settings>(META_SETTINGS)) ?? DEFAULT_SETTINGS;
@@ -52,61 +43,34 @@ async function callClient(action: QueuedAction): Promise<void> {
   }
 }
 
-async function recordBlock(excerpt: string, now: number): Promise<void> {
+async function recordBlock(info: BlockInfo): Promise<void> {
   try {
-    await setMeta(META_BLOCK, {
-      reason: 'non_json',
-      status: 0,
-      endpoint: 'unknown',
-      excerpt,
-      at: now,
-    } satisfies BlockInfo);
+    await setMeta(META_BLOCK, info);
   } catch (error) {
-    log.error('could not record block', error);
+    blockedInMemory = true;
+    log.error('could not record block', error, info);
   }
 }
 
 async function handleSendError(error: unknown, action: QueuedAction, now: number, settings: Settings): Promise<void> {
-  if (error instanceof IgRetryableError) {
-    const attempts = action.attempts + 1;
-    if (attempts >= MAX_ATTEMPTS) {
-      await updateAction({ ...action, status: 'failed', attempts, error: error.message });
-    } else {
-      await updateAction({
-        ...action,
-        status: 'queued',
-        attempts,
-        notBefore: now + attempts * settings.maxDelayMs,
-        error: error.message,
-      });
-    }
+  const outcome = sendErrorOutcome(error, action.attempts);
+  if (outcome.kind === 'fail') {
+    await updateAction({ ...action, status: 'failed', attempts: outcome.attempts, error: outcome.error });
     return;
   }
-
-  let blockInfo: BlockInfo;
-  if (error instanceof IgBlockedError) {
-    blockInfo = error.info;
-  } else if (error instanceof IgShapeError) {
-    blockInfo = {
-      reason: 'non_json',
-      status: 0,
-      endpoint: error.endpoint,
-      excerpt: error.message.slice(0, 200),
-      at: now,
-    };
-  } else {
-    const message = error instanceof Error ? error.message : String(error);
-    log.error('unexpected send error', error);
-    blockInfo = {
-      reason: 'non_json',
-      status: 0,
-      endpoint: 'unknown',
-      excerpt: `Unexpected: ${message}`.slice(0, 200),
-      at: now,
-    };
+  if (outcome.kind === 'retry') {
+    await requeueIfStillWanted(action, {
+      attempts: outcome.attempts,
+      notBefore: now + outcome.attempts * settings.maxDelayMs,
+      error: outcome.error,
+    });
+    return;
   }
-  await setMeta(META_BLOCK, blockInfo);
-  await updateAction({ ...action, status: 'queued' });
+  if (!(error instanceof IgBlockedError || error instanceof IgShapeError)) {
+    log.error('unexpected send error', error);
+  }
+  await recordBlock(blockFromError(error, 'unknown', now));
+  await requeueIfStillWanted(action, {});
 }
 
 export async function runSendTick(now: number): Promise<SendPlan> {
@@ -120,6 +84,14 @@ export async function runSendTick(now: number): Promise<SendPlan> {
     actionsByStatus('queued'),
     actionsByStatus('sent'),
   ]);
+
+  if (mode === 'sending' && !block) {
+    const accountBlock = await sessionBlock(now);
+    if (accountBlock) {
+      await recordBlock(accountBlock);
+      return { kind: 'idle', reason: 'blocked' };
+    }
+  }
 
   const plan = planSend({
     mode: mode ?? 'paused',
@@ -154,7 +126,13 @@ export async function runSendTick(now: number): Promise<SendPlan> {
   } catch (error) {
     // Request went out: never re-queue. The action stays 'sending' and the next tick marks it failed.
     log.error('could not record sent action', error);
-    await recordBlock('Could not record a sent action', now);
+    await recordBlock({
+      reason: 'non_json',
+      status: 0,
+      endpoint: 'unknown',
+      excerpt: 'Could not record a sent action',
+      at: now,
+    });
   }
   return plan;
 }
@@ -178,10 +156,14 @@ export async function tickAndReschedule(): Promise<void> {
   }
   tickInFlight = true;
   try {
+    if (blockedInMemory) {
+      await chrome.alarms.clear(SEND_ALARM);
+      return;
+    }
     const now = Date.now();
     const plan = await runSendTick(now);
     const block = await getMeta<BlockInfo | null>(META_BLOCK);
-    if (block) {
+    if (block || blockedInMemory) {
       await chrome.alarms.clear(SEND_ALARM);
     } else if (kickedDuringTick) {
       await chrome.alarms.create(SEND_ALARM, { when: Date.now() + 1000 });
@@ -195,6 +177,10 @@ export async function tickAndReschedule(): Promise<void> {
 }
 
 export async function rearmFallback(): Promise<void> {
+  if (blockedInMemory) {
+    await chrome.alarms.clear(SEND_ALARM);
+    return;
+  }
   const block = await getMeta<BlockInfo | null>(META_BLOCK);
   if (!block) {
     await chrome.alarms.create(SEND_ALARM, { when: Date.now() + MIN_WAIT_MS });

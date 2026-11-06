@@ -1,4 +1,5 @@
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
+import { decisionImplies } from '../core/decisions';
 import {
   DB_NAME,
   DB_VERSION,
@@ -128,17 +129,46 @@ export async function cancelIfQueued(id: number): Promise<boolean> {
   return true;
 }
 
+// Reads the person in the same transaction so an undo can never slip between the check and the claim.
 export async function claimForSending(id: number): Promise<QueuedAction | null> {
   const db = await openDb();
-  const tx = db.transaction(STORE_ACTIONS, 'readwrite');
-  const action = await tx.store.get(id);
+  const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS], 'readwrite');
+  const actions = tx.objectStore(STORE_ACTIONS);
+  const action = await actions.get(id);
   if (action?.status !== 'queued') {
     await tx.done;
     return null;
   }
+  const person = await tx.objectStore(STORE_PEOPLE).get(action.personPk);
+  if (!person || !decisionImplies(person.decision, action.type)) {
+    await Promise.all([actions.put({ ...action, status: 'cancelled' }), tx.done]);
+    return null;
+  }
   const claimed: QueuedAction = { ...action, status: 'sending' };
-  await Promise.all([tx.store.put(claimed), tx.done]);
+  await Promise.all([actions.put(claimed), tx.done]);
   return claimed;
+}
+
+// Puts a failed send back in the queue only if it is still in flight and still wanted.
+export async function requeueIfStillWanted(action: QueuedAction, patch: Partial<QueuedAction>): Promise<boolean> {
+  if (action.id === undefined) {
+    return false;
+  }
+  const db = await openDb();
+  const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS], 'readwrite');
+  const actions = tx.objectStore(STORE_ACTIONS);
+  const latest = await actions.get(action.id);
+  if (latest?.status !== 'sending') {
+    await tx.done;
+    return false;
+  }
+  const person = await tx.objectStore(STORE_PEOPLE).get(latest.personPk);
+  if (!person || !decisionImplies(person.decision, latest.type)) {
+    await Promise.all([actions.put({ ...latest, status: 'cancelled' }), tx.done]);
+    return false;
+  }
+  await Promise.all([actions.put({ ...latest, ...patch, status: 'queued' }), tx.done]);
+  return true;
 }
 
 export async function recordDecision(person: Person, actions: QueuedAction[]): Promise<number[]> {

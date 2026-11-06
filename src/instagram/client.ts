@@ -1,6 +1,8 @@
-import { logRequest, type RequestLogRow } from '../db/db';
+import { checkAccount } from '../core/account-guard';
+import { getMeta, logRequest, type RequestLogRow } from '../db/db';
+import { META_ACCOUNT } from '../shared/constants';
 import { log } from '../shared/log';
-import type { MutualPreview } from '../shared/types';
+import type { AccountMeta, BlockInfo, MutualPreview } from '../shared/types';
 import {
   followersRequest,
   followingRequest,
@@ -50,6 +52,25 @@ async function requireSession(endpoint: string): Promise<{ userId: string; csrfT
     });
   }
   return session;
+}
+
+// Null when the Instagram session is present and belongs to the stored account.
+export async function sessionBlock(now: number): Promise<BlockInfo | null> {
+  const session = await readSession();
+  const status = checkAccount(await getMeta<AccountMeta>(META_ACCOUNT), session?.userId ?? null);
+  if (status === 'logged_out') {
+    return { reason: 'login_required', status: 0, endpoint: 'session', excerpt: 'No Instagram session found', at: now };
+  }
+  if (status === 'mismatch') {
+    return {
+      reason: 'account_mismatch',
+      status: 0,
+      endpoint: 'session',
+      excerpt: 'Instagram session is a different account',
+      at: now,
+    };
+  }
+  return null;
 }
 
 // Logs every attempt (never bodies or tokens) before parsing, then rethrows errors untouched.

@@ -1,6 +1,7 @@
 import type { IgRequest } from '../instagram/transport';
+import { IG_APP_ID } from '../shared/constants';
 
-const IG_APP_ID = '936619743392459';
+const FETCH_TIMEOUT_MS = 30000;
 
 function readCsrfToken(): string {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
@@ -48,9 +49,13 @@ async function performFetch(req: IgRequest) {
       credentials: 'include',
       headers,
       body,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     return { status: response.status, url: response.url, text: await response.text() };
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      return { networkError: 'Instagram did not answer in time', timedOut: true };
+    }
     return { networkError: error instanceof Error ? error.message : 'Network failure' };
   }
 }

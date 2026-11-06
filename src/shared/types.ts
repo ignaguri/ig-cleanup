@@ -48,7 +48,10 @@ export type BlockInfo = {
     | 'login_required'
     | 'login_redirect'
     | 'challenge_redirect'
-    | 'non_json';
+    | 'rate_limited'
+    | 'account_mismatch'
+    | 'non_json'
+    | 'not_found';
   status: number;
   endpoint: string;
   excerpt: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Person, QueuedAction } from '../shared/types';
-import { actionsFor, availableDecisions, planUndo } from './decisions';
+import { actionsFor, availableDecisions, decisionImplies, planUndo } from './decisions';
 
 function person(overrides: Partial<Person> = {}): Person {
   return {
@@ -41,6 +41,7 @@ function action(overrides: Partial<QueuedAction> = {}): QueuedAction {
 describe('availableDecisions', () => {
   it('offers keep and unfollow for someone only I follow', () => {
     expect(availableDecisions(person({ iFollow: true, followsMe: false }))).toEqual(['keep', 'unfollow']);
+    expect(availableDecisions(person({ iFollow: false, followsMe: true }))).toEqual(['keep', 'remove']);
   });
 
   it('offers everything for a mutual', () => {
@@ -80,5 +81,17 @@ describe('planUndo', () => {
 
   it('cancels a queued action by id', () => {
     expect(planUndo(person(), action())).toEqual({ kind: 'cancel', actionId: 7 });
+  });
+});
+
+describe('decisionImplies', () => {
+  it('keeps writes only while the decision asks for them', () => {
+    expect(decisionImplies('unfollow', 'unfollow')).toBe(true);
+    expect(decisionImplies('both', 'unfollow')).toBe(true);
+    expect(decisionImplies('remove', 'remove')).toBe(true);
+    expect(decisionImplies('both', 'remove')).toBe(true);
+    expect(decisionImplies('undecided', 'unfollow')).toBe(false);
+    expect(decisionImplies('unfollow', 'remove')).toBe(false);
+    expect(decisionImplies('undecided', 'follow')).toBe(true);
   });
 });

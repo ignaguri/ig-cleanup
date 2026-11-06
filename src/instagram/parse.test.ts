@@ -119,6 +119,24 @@ describe('detectBlock', () => {
     expect(block?.excerpt).toHaveLength(200);
   });
 
+  it('detects a 400 "please wait" reply as rate_limited', () => {
+    const text = '{"message":"Please wait a few minutes before you try again.","require_login":true,"status":"fail"}';
+    const block = detectBlock({ status: 400, url: URL_OK, text }, 'e', now);
+    expect(block).toMatchObject({ reason: 'rate_limited', status: 400 });
+  });
+
+  it('treats a plain 404 as one account gone, but a throttled 404 as a block', () => {
+    expect(detectBlock({ status: 404, url: URL_OK, text: '{"message":"Not found"}' }, 'e', now)?.reason).toBe(
+      'not_found',
+    );
+    const throttled = JSON.stringify({ message: 'Please wait', status: 'fail' });
+    expect(detectBlock({ status: 404, url: URL_OK, text: throttled }, 'e', now)?.reason).toBe('rate_limited');
+  });
+
+  it('detects a 200 spam reply as rate_limited', () => {
+    expect(detectBlock(ok({ status: 'fail', spam: true }), 'e', now)?.reason).toBe('rate_limited');
+  });
+
   it('returns null for a healthy response', () => {
     expect(detectBlock(ok(followers), 'e', now)).toBeNull();
   });
@@ -132,6 +150,6 @@ describe('parseWriteResult', () => {
   });
 
   it('throws IgShapeError when status is not ok', () => {
-    expect(() => parseWriteResult(ok({ status: 'fail' }), 'w')).toThrow(IgShapeError);
+    expect(() => parseWriteResult(ok({ status: 'pending' }), 'w')).toThrow(IgShapeError);
   });
 });
