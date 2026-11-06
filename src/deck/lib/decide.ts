@@ -1,5 +1,5 @@
-import { actionsFor, availableDecisions, planUndo, type UndoStep } from '../../core/decisions';
-import { actionsForPerson, cancelIfQueued, getPerson, recordDecision } from '../../db/db';
+import { actionsFor, availableDecisions, planUndo, queuedAction, type UndoStep } from '../../core/decisions';
+import { cancelIfQueued, getAction, getPerson, recordDecision } from '../../db/db';
 import { UNDO_HISTORY_SIZE } from '../../shared/constants';
 import { log } from '../../shared/log';
 import type { Decision, QueuedAction } from '../../shared/types';
@@ -8,11 +8,7 @@ type HistoryEntry = { personPk: string; previousDecision: Decision; actionIds: n
 
 const history: HistoryEntry[] = [];
 
-export function canUndo(): boolean {
-  return history.length > 0;
-}
-
-function kick() {
+export function kick() {
   try {
     // The service worker may be asleep or absent; a failed wake-up is not fatal.
     chrome.runtime.sendMessage({ type: 'igc:kick' }).catch((error: unknown) => {
@@ -29,7 +25,7 @@ export async function decide(personPk: string, decision: Decision): Promise<void
     return;
   }
   const now = Date.now();
-  const actionIds = await recordDecision({ ...person, decision, decidedAt: now }, actionsFor(person, decision, now));
+  const actionIds = await recordDecision(personPk, { decision, decidedAt: now }, actionsFor(person, decision, now));
   history.push({ personPk, previousDecision: person.decision, actionIds });
   if (history.length > UNDO_HISTORY_SIZE) {
     history.shift();
@@ -37,46 +33,37 @@ export async function decide(personPk: string, decision: Decision): Promise<void
   kick();
 }
 
-export async function undoLast(): Promise<UndoStep[]> {
+export type UndoResult = { personPk: string | null; steps: UndoStep[] };
+
+export async function undoLast(): Promise<UndoResult> {
   const entry = history.pop();
   if (!entry) {
-    return [];
+    return { personPk: null, steps: [] };
   }
   const person = await getPerson(entry.personPk);
   if (!person) {
-    return [];
+    return { personPk: null, steps: [] };
   }
   const now = Date.now();
   const steps: UndoStep[] = [];
   const refollows: QueuedAction[] = [];
   for (const actionId of entry.actionIds) {
-    const findAction = async () =>
-      (await actionsForPerson(entry.personPk)).find((candidate) => candidate.id === actionId);
-    const action = await findAction();
+    const action = await getAction(actionId);
     if (!action) {
       continue;
     }
     let step = planUndo(person, action);
     if (step.kind === 'cancel' && !(await cancelIfQueued(step.actionId))) {
       // The sender claimed it first: re-plan against the current status.
-      const latest = await findAction();
+      const latest = await getAction(actionId);
       step = latest ? planUndo(person, latest) : { kind: 'none' };
     }
     steps.push(step);
     if (step.kind === 'refollow') {
-      refollows.push({
-        personPk: person.pk,
-        type: 'follow',
-        status: 'queued',
-        attempts: 0,
-        createdAt: now,
-        notBefore: now,
-        sentAt: null,
-        error: null,
-      });
+      refollows.push(queuedAction(person.pk, 'follow', now));
     }
   }
-  await recordDecision({ ...person, decision: entry.previousDecision, decidedAt: null }, refollows);
+  await recordDecision(person.pk, { decision: entry.previousDecision, decidedAt: null }, refollows);
   kick();
-  return steps;
+  return { personPk: person.pk, steps };
 }
