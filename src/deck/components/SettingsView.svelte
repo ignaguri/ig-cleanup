@@ -4,6 +4,7 @@ import { allPeople, getMeta, putPeople, type RequestLogRow, recentRequests, setM
 import { DEFAULT_SETTINGS, META_SETTINGS } from '../../shared/constants';
 import { log } from '../../shared/log';
 import type { Mode, Settings } from '../../shared/types';
+import { kick } from '../lib/decide';
 import ConfirmDialog from './ConfirmDialog.svelte';
 
 type Props = {
@@ -26,6 +27,7 @@ let settingsMessage = $state('');
 let importMessage = $state('');
 let requests = $state<RequestLogRow[]>([]);
 let confirmOpen = $state(false);
+let importing = $state(false);
 let loaded = false;
 
 async function loadSettings() {
@@ -63,6 +65,7 @@ async function saveSettings() {
       minDelayMs: Math.round(minDelaySeconds * 1000),
       maxDelayMs: Math.round(maxDelaySeconds * 1000),
     });
+    kick();
     settingsMessage = 'Saved';
   } catch (error) {
     onError(error);
@@ -75,6 +78,7 @@ async function loadExport(event: Event) {
   if (files.length === 0) {
     return;
   }
+  importing = true;
   try {
     const dates = parseExport(await readExportFiles(files));
     const { updated, matched, unmatched } = applyExportDates(await allPeople(), dates);
@@ -87,6 +91,7 @@ async function loadExport(event: Event) {
     onError(error);
   } finally {
     input.value = '';
+    importing = false;
   }
 }
 </script>
@@ -131,8 +136,20 @@ async function loadExport(event: Event) {
     <h2 class="text-lg">Data</h2>
     <label class="block space-y-1">
       <span>Load export</span>
-      <input type="file" multiple accept=".zip,.json" onchange={loadExport} />
+      <input
+        type="file"
+        multiple
+        accept=".zip,.json"
+        disabled={mode === 'collecting' || importing}
+        onchange={loadExport}
+      />
     </label>
+    {#if mode === 'collecting'}
+      <p class="text-muted">Pause collection before loading an export.</p>
+    {/if}
+    {#if importing}
+      <p class="text-muted">Importing…</p>
+    {/if}
     {#if importMessage}
       <p class="text-muted">{importMessage}</p>
     {/if}

@@ -17,11 +17,18 @@ async function focusOtherDeckTab(): Promise<boolean> {
   return true;
 }
 
+function closeThisTab() {
+  chrome.tabs
+    .getCurrent()
+    .then((tab) => (tab?.id === undefined ? window.close() : chrome.tabs.remove(tab.id)))
+    .catch((error) => log.error('could not close duplicate deck tab', error));
+}
+
 // Two deck tabs would run two collectors against the same IndexedDB.
 focusOtherDeckTab()
   .then((focused) => {
     if (focused) {
-      window.close();
+      closeThisTab();
     } else {
       mount(App, { target: document.getElementById('app')! });
     }

@@ -9,6 +9,11 @@ type Props = {
   onConfirm: () => void;
 };
 let { open = $bindable(), title, description, confirmLabel, onConfirm }: Props = $props();
+
+function confirm() {
+  open = false;
+  onConfirm();
+}
 </script>
 
 <Dialog.Root bind:open>
@@ -19,7 +24,7 @@ let { open = $bindable(), title, description, confirmLabel, onConfirm }: Props =
       <Dialog.Description class="text-sm text-muted">{description}</Dialog.Description>
       <div class="flex justify-end gap-3 text-sm">
         <Dialog.Close class="px-3 py-1 text-muted">Cancel</Dialog.Close>
-        <button type="button" class="rounded-card bg-cut px-3 py-1 text-text" onclick={onConfirm}>{confirmLabel}</button>
+        <button type="button" class="rounded-card bg-cut px-3 py-1 text-text" onclick={confirm}>{confirmLabel}</button>
       </div>
     </Dialog.Content>
   </Dialog.Portal>

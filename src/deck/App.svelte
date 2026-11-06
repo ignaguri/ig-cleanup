@@ -128,10 +128,14 @@ async function handleRefreshPictures() {
   try {
     // Stop first: the collector overwrites META_COLLECTION from memory.
     stopCollecting();
-    const current = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
+    const storedCollection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
+    if (storedCollection.refreshingPictures) {
+      startCollecting();
+      return;
+    }
     const currentMode = (await getMeta<Mode>(META_MODE)) ?? 'paused';
     await setMeta<CollectionState>(META_COLLECTION, {
-      ...current,
+      ...storedCollection,
       followers: INITIAL_COLLECTION.followers,
       following: INITIAL_COLLECTION.following,
       refreshingPictures: true,
@@ -184,10 +188,10 @@ async function init() {
     gate = { kind: 'mismatch', currentUserId, storedUserId: stored.userId };
     return;
   }
-  gate = { kind: 'ok' };
   await refresh();
   const progress = collectionProgress(collection, people);
   view = progress.phase === 'done' ? 'deck' : 'collection';
+  gate = { kind: 'ok' };
   if (mode === 'collecting' && block === null) {
     startCollecting();
   }
@@ -198,6 +202,9 @@ function onRejection(event: PromiseRejectionEvent) {
 }
 
 function onWindowError(event: ErrorEvent) {
+  if (event.message.startsWith('ResizeObserver loop')) {
+    return;
+  }
   reportError(event.error ?? event.message);
 }
 
@@ -317,10 +324,16 @@ onMount(() => {
     {/if}
   </main>
 {:else if gate.kind === 'logged_out'}
+  {#if errorMessage}
+    <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
+  {/if}
   <main class="flex min-h-screen items-center justify-center bg-bg p-6 text-text">
     <p class="text-lg">Log in to instagram.com in this Chrome profile, then reload</p>
   </main>
 {:else if gate.kind === 'mismatch'}
+  {#if errorMessage}
+    <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
+  {/if}
   <AccountMismatch currentUserId={gate.currentUserId} storedUserId={gate.storedUserId} onStartNew={handleStartNew} />
 {:else}
   <main class="flex min-h-screen flex-col gap-4 bg-bg p-6 text-text">

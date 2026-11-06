@@ -31,7 +31,7 @@ const timeLeft = $derived.by(() => {
   if (progress.phase === 'mutuals') {
     return formatDuration((progress.mutualsTotal - progress.mutualsDone) * averageMutualsDelayMs);
   }
-  return 'Done';
+  return 'Collection complete';
 });
 </script>
 
@@ -44,7 +44,11 @@ const timeLeft = $derived.by(() => {
     {#if progress.phase === 'mutuals'}
       <p>Mutuals fetched: {progress.mutualsDone} / {progress.mutualsTotal}</p>
     {/if}
-    <p class="text-muted">{progress.phase === 'lists' ? 'Progress' : 'Time left'}: {timeLeft}</p>
+    {#if progress.phase === 'done'}
+      <p class="text-muted">{timeLeft}</p>
+    {:else}
+      <p class="text-muted">{progress.phase === 'lists' ? 'Progress' : 'Time left'}: {timeLeft}</p>
+    {/if}
     {#if collection.refreshingPictures}
       <p class="text-muted">Refreshing pictures</p>
     {/if}
