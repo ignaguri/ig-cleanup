@@ -23,10 +23,23 @@ export async function readSession(): Promise<{ userId: string; csrfToken: string
   return { userId: userIdCookie.value, csrfToken: csrfCookie.value };
 }
 
+// Tabs opened before an extension reload have no content script until injected.
+async function sendToRelay(tabId: number, message: unknown) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('Receiving end does not exist')) {
+      throw error;
+    }
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    return chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
 export async function igFetch(req: IgRequest): Promise<IgRawResponse> {
   try {
     const tabId = await ensureRelayTab();
-    const reply = await chrome.tabs.sendMessage(tabId, { type: 'igc:fetch', req });
+    const reply = await sendToRelay(tabId, { type: 'igc:fetch', req });
     if (!reply || 'networkError' in reply) {
       throw new Error(reply?.networkError ?? 'No reply from relay tab');
     }
