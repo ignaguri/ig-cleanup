@@ -8,9 +8,10 @@ type Props = {
   people: Person[];
   mode: Mode | undefined;
   onStart: () => void;
+  onPause: () => void;
   onPauseAndSend: () => void;
 };
-let { collection, people, mode, onStart, onPauseAndSend }: Props = $props();
+let { collection, people, mode, onStart, onPause, onPauseAndSend }: Props = $props();
 
 const progress = $derived(collectionProgress(collection, people));
 const collecting = $derived(mode === 'collecting');
@@ -58,6 +59,8 @@ const timeLeft = $derived.by(() => {
       <button type="button" class="rounded-card bg-keep px-4 py-2 text-bg" onclick={onStart}>
         Start/Resume collection
       </button>
+    {:else}
+      <button type="button" class="rounded-card bg-surface px-4 py-2" onclick={onPause}>Pause</button>
     {/if}
     <button type="button" class="rounded-card bg-surface px-4 py-2" onclick={onPauseAndSend}>
       Pause collection, start sending

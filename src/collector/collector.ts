@@ -2,6 +2,7 @@ import { INITIAL_COLLECTION, nextListStep, nextMutualsTarget } from '../core/col
 import { randomDelay } from '../core/pacing';
 import { mergeListPage } from '../core/people';
 import { actionsByStatus, allPeople, getMeta, putPeople, setMeta } from '../db/db';
+import { kick } from '../deck/lib/decide';
 import { fetchFollowersPage, fetchFollowingPage, fetchMutuals } from '../instagram/client';
 import { IgBlockedError, IgRetryableError, IgShapeError } from '../instagram/errors';
 import { readSession } from '../instagram/transport';
@@ -17,7 +18,9 @@ import {
 import { log } from '../shared/log';
 import type { AccountMeta, BlockInfo, CollectionState, Mode, Person } from '../shared/types';
 
-type CollectorHandle = { stop(): void };
+export type CollectorHandle = { stop(): Promise<void> };
+
+type CollectorRun = { handle: CollectorHandle; isStopping: () => boolean; finished: Promise<void> };
 
 class CursorStalledError extends Error {
   constructor(public endpoint: string) {
@@ -26,16 +29,22 @@ class CursorStalledError extends Error {
   }
 }
 
-let activeCollector: CollectorHandle | null = null;
+let activeRun: CollectorRun | null = null;
 
 export function startCollector(onUpdate: () => void): CollectorHandle {
-  if (activeCollector !== null) {
-    return activeCollector;
+  if (activeRun !== null && !activeRun.isStopping()) {
+    return activeRun.handle;
   }
+  // A run that is still exiting may have a request in flight: never overlap two runs.
+  const previousFinished = activeRun?.finished ?? Promise.resolve();
 
   let stopped = false;
   let timerId: ReturnType<typeof setTimeout> | null = null;
   let wake: (() => void) | null = null;
+  let markFinished: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    markFinished = resolve;
+  });
 
   const handle: CollectorHandle = {
     stop() {
@@ -44,14 +53,16 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
         clearTimeout(timerId);
       }
       wake?.();
-      release();
+      return finished;
     },
   };
+  const thisRun: CollectorRun = { handle, isStopping: () => stopped, finished };
 
   function release(): void {
-    if (activeCollector === handle) {
-      activeCollector = null;
+    if (activeRun === thisRun) {
+      activeRun = null;
     }
+    markFinished();
   }
 
   function sleep(ms: number): Promise<void> {
@@ -97,6 +108,10 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
   async function run(): Promise<void> {
     let stepLabel = 'setup';
     try {
+      await previousFinished;
+      if (stopped) {
+        return;
+      }
       const peopleByPk = new Map<string, Person>((await allPeople()).map((p) => [p.pk, p]));
       let collection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
 
@@ -132,6 +147,7 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
           collection = { ...collection, refreshingPictures: false, modeBeforeRefresh: null };
           await setMeta(META_COLLECTION, collection);
           await setMeta<Mode>(META_MODE, restoredMode);
+          kick();
           onUpdate();
           return;
         }
@@ -181,6 +197,7 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
               collection = { ...collection, refreshingPictures: false, modeBeforeRefresh: null };
               await setMeta(META_COLLECTION, collection);
               await setMeta<Mode>(META_MODE, restoredMode);
+              kick();
               onUpdate();
               return;
             }
@@ -190,7 +207,8 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
             if (target === null) {
               collection = { ...collection, mutualsCompletedAt: Date.now() };
               await setMeta(META_COLLECTION, collection);
-              await setMeta<Mode>(META_MODE, 'sending');
+              // Never start sending unattended: the user turns sending on.
+              await setMeta<Mode>(META_MODE, 'paused');
               onUpdate();
               return;
             }
@@ -238,10 +256,9 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
     }
   }
 
-  activeCollector = handle;
+  activeRun = thisRun;
   run().catch((error) => {
     log.error('collector crashed', error);
-    release();
   });
 
   return handle;

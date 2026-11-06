@@ -10,15 +10,14 @@ import ConfirmDialog from './ConfirmDialog.svelte';
 type Props = {
   mode: Mode | undefined;
   refreshKey: number;
-  onPauseSending: () => void;
-  onResumeSending: () => void;
+  onPause: () => void;
+  onStartSending: () => void;
   onRefreshPictures: () => void;
   onStartNew: () => void;
   onError: (error: unknown) => void;
   onImported: () => void;
 };
-let { mode, refreshKey, onPauseSending, onResumeSending, onRefreshPictures, onStartNew, onError, onImported }: Props =
-  $props();
+let { mode, refreshKey, onPause, onStartSending, onRefreshPictures, onStartNew, onError, onImported }: Props = $props();
 
 let dailyCap = $state(DEFAULT_SETTINGS.dailyCap);
 let minDelaySeconds = $state(DEFAULT_SETTINGS.minDelayMs / 1000);
@@ -123,11 +122,14 @@ async function loadExport(event: Event) {
         <span class="text-muted">{settingsMessage}</span>
       {/if}
     </div>
-    <div>
+    <div class="flex gap-3">
       {#if mode === 'sending'}
-        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onPauseSending}>Pause sending</button>
+        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onPause}>Pause sending</button>
       {:else}
-        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onResumeSending}>Resume sending</button>
+        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onStartSending}>Start sending</button>
+      {/if}
+      {#if (mode ?? 'paused') !== 'paused'}
+        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onPause}>Pause</button>
       {/if}
     </div>
   </form>

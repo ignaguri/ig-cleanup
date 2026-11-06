@@ -1,7 +1,7 @@
 <script lang="ts">
 import clsx from 'clsx';
 import { onMount } from 'svelte';
-import { startCollector } from '../collector/collector';
+import { type CollectorHandle, startCollector } from '../collector/collector';
 import { checkAccount } from '../core/account-guard';
 import { collectionProgress, INITIAL_COLLECTION } from '../core/collection';
 import { availableDecisions } from '../core/decisions';
@@ -51,7 +51,7 @@ let view = $state<View>('deck');
 let collection = $state<CollectionState>(INITIAL_COLLECTION);
 let mode = $state<Mode | undefined>(undefined);
 let block = $state<BlockInfo | null>(null);
-let collector: { stop(): void } | null = null;
+let collector: CollectorHandle | null = null;
 
 const counts = $derived(deckCounts(people));
 const current = $derived(buildDeck(people, selectedDeck)[0] ?? null);
@@ -92,9 +92,15 @@ function startCollecting() {
   });
 }
 
-function stopCollecting() {
-  collector?.stop();
+// Resolves once the collector loop has exited, so no collector request is still in flight.
+async function stopCollecting() {
+  const stopping = collector;
   collector = null;
+  await stopping?.stop();
+}
+
+function stopCollectingInBackground() {
+  stopCollecting().catch((error) => log.warn('stop collector failed', error));
 }
 
 async function handleStartCollecting() {
@@ -106,18 +112,9 @@ async function handleStartCollecting() {
   }
 }
 
-async function handlePauseAndSend() {
-  try {
-    stopCollecting();
-    await setMode('sending');
-  } catch (error) {
-    reportError(error);
-  }
-}
-
 async function handleSendingMode(next: 'sending' | 'paused') {
   try {
-    stopCollecting();
+    await stopCollecting();
     await setMode(next);
   } catch (error) {
     reportError(error);
@@ -127,7 +124,7 @@ async function handleSendingMode(next: 'sending' | 'paused') {
 async function handleRefreshPictures() {
   try {
     // Stop first: the collector overwrites META_COLLECTION from memory.
-    stopCollecting();
+    await stopCollecting();
     const storedCollection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
     if (storedCollection.refreshingPictures) {
       startCollecting();
@@ -166,7 +163,7 @@ async function handleResumeBlock() {
 
 async function handleStartNew() {
   try {
-    stopCollecting();
+    await stopCollecting();
     await wipeAll();
     kick();
     location.reload();
@@ -298,7 +295,7 @@ onMount(() => {
   init().catch(reportError);
   window.addEventListener('unhandledrejection', onRejection);
   window.addEventListener('error', onWindowError);
-  window.addEventListener('pagehide', stopCollecting);
+  window.addEventListener('pagehide', stopCollectingInBackground);
   const intervalId = setInterval(() => {
     if (!busy && gate.kind === 'ok') {
       refresh().catch((error) => log.warn('refresh failed', error));
@@ -308,8 +305,8 @@ onMount(() => {
     clearInterval(intervalId);
     window.removeEventListener('unhandledrejection', onRejection);
     window.removeEventListener('error', onWindowError);
-    window.removeEventListener('pagehide', stopCollecting);
-    stopCollecting();
+    window.removeEventListener('pagehide', stopCollectingInBackground);
+    stopCollectingInBackground();
   };
 });
 </script>
@@ -369,7 +366,7 @@ onMount(() => {
         </section>
         <aside class="w-64 space-y-4">
           <DeckSidebar {counts} selected={selectedDeck} onSelect={(deck) => (selectedDeck = deck)} />
-          <QueueStatus {refreshKey} />
+          <QueueStatus {mode} {refreshKey} />
         </aside>
       </div>
     {:else if view === 'collection'}
@@ -378,14 +375,15 @@ onMount(() => {
         {people}
         {mode}
         onStart={handleStartCollecting}
-        onPauseAndSend={handlePauseAndSend}
+        onPause={() => handleSendingMode('paused')}
+        onPauseAndSend={() => handleSendingMode('sending')}
       />
     {:else}
       <SettingsView
         {mode}
         {refreshKey}
-        onPauseSending={() => handleSendingMode('paused')}
-        onResumeSending={() => handleSendingMode('sending')}
+        onPause={() => handleSendingMode('paused')}
+        onStartSending={() => handleSendingMode('sending')}
         onRefreshPictures={handleRefreshPictures}
         onStartNew={handleStartNew}
         onError={reportError}
