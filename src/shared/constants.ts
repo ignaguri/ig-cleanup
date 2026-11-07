@@ -20,7 +20,7 @@ export const IG_APP_ID = '936619743392459';
 
 export const LIST_PAGE_SIZE = 12;
 export const LIST_DELAY_MS: [number, number] = [2000, 4000];
-export const MUTUALS_DELAY_MS: [number, number] = [5000, 10000];
+export const MUTUALS_DELAY_MS: [number, number] = [30000, 60000];
 
 export const DEFAULT_SETTINGS: Settings = { dailyCap: 100, minDelayMs: 30000, maxDelayMs: 90000 };
 export const MAX_ATTEMPTS = 3;
