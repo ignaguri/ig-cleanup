@@ -12,9 +12,42 @@ const KEY_HINTS: Record<string, string> = { keep: '→', unfollow: '←', remove
 const LABELS: Record<string, string> = { keep: 'Keep', unfollow: 'Unfollow', remove: 'Remove', both: 'Both' };
 
 let imageFailed = $state(false);
+let pictureSrc = $state<string | null>(null);
+// The CDN refuses cross-origin <img> loads, so fetch the bytes (host permission) and show a blob URL.
 $effect(() => {
-  person.pk;
+  const url = person.picUrl;
   imageFailed = false;
+  pictureSrc = null;
+  if (!url) {
+    return;
+  }
+  let objectUrl: string | null = null;
+  let cancelled = false;
+  fetch(url, { credentials: 'omit' })
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`picture ${response.status}`);
+      }
+      return response.blob();
+    })
+    .then((blob) => {
+      if (cancelled) {
+        return;
+      }
+      objectUrl = URL.createObjectURL(blob);
+      pictureSrc = objectUrl;
+    })
+    .catch(() => {
+      if (!cancelled) {
+        imageFailed = true;
+      }
+    });
+  return () => {
+    cancelled = true;
+    if (objectUrl !== null) {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
 });
 
 const initials = $derived((person.fullName || person.username).trim().slice(0, 2).toUpperCase());
@@ -67,12 +100,12 @@ function hintFor(decision: Decision): string {
   )}
 >
   <div class="flex items-center gap-4">
-    {#if imageFailed || !person.picUrl}
+    {#if imageFailed || !person.picUrl || pictureSrc === null}
       <div class="flex h-20 w-20 items-center justify-center rounded-full bg-bg text-lg text-muted">{initials}</div>
     {:else}
       <img
         class="h-20 w-20 rounded-full object-cover"
-        src={person.picUrl}
+        src={pictureSrc}
         alt={person.username}
         onerror={() => (imageFailed = true)}
       />
