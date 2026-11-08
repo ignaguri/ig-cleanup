@@ -34,9 +34,10 @@ describe('nextListStep', () => {
 });
 
 describe('nextMutualsTarget', () => {
-  it('skips fetched, sent and deckless people', () => {
+  it('skips fetched, decided, sent and deckless people', () => {
     const people = [
       person({ pk: 'fetched', mutualsFetchedAt: 1 }),
+      person({ pk: 'decided', decision: 'keep', listIndex: 0 }),
       person({ pk: 'sent' }),
       person({ pk: 'none', iFollow: false, followsMe: false }),
       person({ pk: 'target', listIndex: 5 }),
@@ -60,6 +61,10 @@ describe('nextMutualsTarget', () => {
     ).toBe('fan');
   });
 
+  it('never targets the mutual deck', () => {
+    expect(nextMutualsTarget([person({ pk: 'mutual', followsMe: true })], new Set())).toBeNull();
+  });
+
   it('returns null when nothing is left', () => {
     expect(nextMutualsTarget([], new Set())).toBeNull();
   });
@@ -70,6 +75,7 @@ describe('collectionProgress', () => {
 
   it('is in the lists phase until both cursors are done', () => {
     expect(collectionProgress(INITIAL_COLLECTION, []).phase).toBe('lists');
+    expect(collectionProgress({ ...INITIAL_COLLECTION, followers: doneCursor }, []).phase).toBe('lists');
   });
 
   it('reports mutuals phase with counts, then done', () => {

@@ -66,6 +66,9 @@ const mutualsLine = $derived.by(() => {
     if (person.mutualsFetchedAt !== null) {
       return 'People in common: unavailable';
     }
+    if (person.iFollow && person.followsMe) {
+      return 'People in common: not fetched for mutuals';
+    }
     return 'People in common: loading later';
   }
   if (mutuals.usernames.length === 0) {
