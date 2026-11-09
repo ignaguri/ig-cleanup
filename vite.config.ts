@@ -1,4 +1,3 @@
-import { cpSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -26,7 +25,6 @@ const buildExtensionScripts = {
   name: 'build-extension-scripts',
   apply: 'build' as const,
   async closeBundle() {
-    cpSync(resolve(rootDir, 'static'), resolve(rootDir, 'dist'), { recursive: true });
     await buildIife(resolve(rootDir, 'src/background/index.ts'), 'background', 'background.js');
     await buildIife(resolve(rootDir, 'src/content/index.ts'), 'content', 'content.js');
   },
@@ -34,6 +32,8 @@ const buildExtensionScripts = {
 
 export default defineConfig({
   base: './',
+  // Copied into dist on build, and served by the demo dev server (favicon).
+  publicDir: 'static',
   plugins: [tailwindcss(), svelte(), buildExtensionScripts],
   build: {
     outDir: 'dist',
