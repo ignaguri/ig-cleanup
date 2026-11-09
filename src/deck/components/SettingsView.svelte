@@ -2,11 +2,12 @@
 import clsx from 'clsx';
 import { onMount } from 'svelte';
 import { applyExportDates, parseExport, readExportFiles } from '../../core/export';
-import { allPeople, getMeta, putPeople, setMeta } from '../../db/db';
+import { allPeople, getMeta, mergePeople, setMeta } from '../../db/db';
 import { DEFAULT_SETTINGS, META_SETTINGS } from '../../shared/constants';
 import { log } from '../../shared/log';
 import type { Mode, Settings } from '../../shared/types';
 import { kick } from '../lib/decide';
+import { downloadExport } from '../lib/export-data';
 import ConfirmDialog from './ConfirmDialog.svelte';
 import Icon from './Icon.svelte';
 
@@ -25,7 +26,7 @@ let dailyCap = $state(DEFAULT_SETTINGS.dailyCap);
 let minDelaySeconds = $state(DEFAULT_SETTINGS.minDelayMs / 1000);
 let maxDelaySeconds = $state(DEFAULT_SETTINGS.maxDelayMs / 1000);
 let settingsMessage = $state<{ text: string; tone: 'ok' | 'error' } | null>(null);
-let importMessage = $state('');
+let dataMessage = $state('');
 let confirmOpen = $state(false);
 let importing = $state(false);
 let savedTimerId: ReturnType<typeof setTimeout> | undefined;
@@ -69,6 +70,14 @@ async function saveSettings() {
   }
 }
 
+async function exportData() {
+  try {
+    dataMessage = await downloadExport(new Date());
+  } catch (error) {
+    onError(error);
+  }
+}
+
 async function loadExport(event: Event) {
   const input = event.currentTarget as HTMLInputElement;
   const files = Array.from(input.files ?? []);
@@ -77,14 +86,28 @@ async function loadExport(event: Event) {
   }
   importing = true;
   try {
-    const dates = parseExport(await readExportFiles(files));
+    const exportFiles = await readExportFiles(files);
+    if (exportFiles.length === 0) {
+      dataMessage =
+        'No followers or following file found. This loads an Instagram data export, not an Export data backup.';
+      return;
+    }
+    const dates = parseExport(exportFiles);
     const { updated, matched, unmatched } = applyExportDates(await allPeople(), dates);
-    await putPeople(updated);
-    importMessage = `Follow dates added for ${matched} accounts, ${unmatched} not found`;
+    // Only the dates are written, onto the stored records, so nothing else changed meanwhile is lost.
+    await mergePeople(
+      updated.map((person) => person.pk),
+      (current) =>
+        updated.flatMap((person) => {
+          const latest = current.get(person.pk);
+          return latest ? [{ ...latest, iFollowedAt: person.iFollowedAt, theyFollowedAt: person.theyFollowedAt }] : [];
+        }),
+    );
+    dataMessage = `Follow dates added for ${matched} accounts, ${unmatched} not found`;
     onImported();
   } catch (error) {
     log.error('export import failed', error);
-    importMessage = '';
+    dataMessage = '';
     onError(error);
   } finally {
     input.value = '';
@@ -150,8 +173,11 @@ const FIELDS = [
   </form>
 
   <div class="panel space-y-5 p-6">
-    {@render sectionHeader('Data', 'Add follow dates from an Instagram export, or reload profile pictures.')}
+    {@render sectionHeader('Data', 'Back up everything as a JSON file, add follow dates from an Instagram export, or reload pictures.')}
     <div class="flex flex-wrap items-center gap-3">
+      <button type="button" class="press btn btn-quiet" onclick={exportData}>
+        <Icon name="download" size={14} /> Export data
+      </button>
       <label
         class={clsx(
           'press btn btn-quiet has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-text',
@@ -159,7 +185,7 @@ const FIELDS = [
         aria-disabled={collecting || importing}
       >
         <Icon name="upload" size={14} />
-        {importing ? 'Importing…' : 'Load export (.zip or .json)'}
+        {importing ? 'Importing…' : 'Load Instagram export (.zip or .json)'}
         <input
           type="file"
           multiple
@@ -176,8 +202,8 @@ const FIELDS = [
     {#if collecting}
       <p class="text-xs text-muted">Pause collection before loading an export.</p>
     {/if}
-    {#if importMessage}
-      <p class="text-soft" role="status">{importMessage}</p>
+    {#if dataMessage}
+      <p class="text-soft" role="status">{dataMessage}</p>
     {/if}
   </div>
 

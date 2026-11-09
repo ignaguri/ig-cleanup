@@ -3,13 +3,14 @@ import { decisionImplies } from '../core/decisions';
 import {
   DB_NAME,
   DB_VERSION,
+  META_MODE,
   REQUEST_LOG_SIZE,
   STORE_ACTIONS,
   STORE_META,
   STORE_PEOPLE,
   STORE_REQUEST_LOG,
 } from '../shared/constants';
-import type { ActionStatus, Person, QueuedAction } from '../shared/types';
+import type { ActionStatus, Decision, Mode, Person, QueuedAction } from '../shared/types';
 
 export type RequestLogRow = { id?: number; endpoint: string; status: number | null; at: number; outcome: string };
 
@@ -60,6 +61,22 @@ export async function putPeople(people: Person[]): Promise<void> {
   await Promise.all([...people.map((person) => tx.store.put(person)), tx.done]);
 }
 
+// Read-modify-write in one transaction, so the collector and a decision never overwrite each other's fields.
+export async function mergePeople(pks: string[], merge: (current: Map<string, Person>) => Person[]): Promise<Person[]> {
+  const db = await openDb();
+  const tx = db.transaction(STORE_PEOPLE, 'readwrite');
+  const current = new Map<string, Person>();
+  for (const pk of new Set(pks)) {
+    const person = await tx.store.get(pk);
+    if (person) {
+      current.set(pk, person);
+    }
+  }
+  const merged = merge(current);
+  await Promise.all([...merged.map((person) => tx.store.put(person)), tx.done]);
+  return merged;
+}
+
 export async function allPeople(): Promise<Person[]> {
   return (await openDb()).getAll(STORE_PEOPLE);
 }
@@ -83,9 +100,8 @@ export async function allActions(): Promise<QueuedAction[]> {
   return (await openDb()).getAll(STORE_ACTIONS);
 }
 
-export async function actionsForPerson(pk: string): Promise<QueuedAction[]> {
-  const actions = await allActions();
-  return actions.filter((action) => action.personPk === pk);
+export async function getAction(id: number): Promise<QueuedAction | undefined> {
+  return (await openDb()).get(STORE_ACTIONS, id);
 }
 
 export async function logRequest(row: RequestLogRow): Promise<void> {
@@ -114,6 +130,27 @@ export async function setMeta<T>(key: string, value: T): Promise<void> {
   await (await openDb()).put(STORE_META, { key, value });
 }
 
+export type DataSnapshot = {
+  people: Person[];
+  actions: QueuedAction[];
+  requestLog: RequestLogRow[];
+  meta: Record<string, unknown>;
+};
+
+// One read transaction, so the snapshot is consistent even while the sender writes.
+export async function snapshotAll(): Promise<DataSnapshot> {
+  const db = await openDb();
+  const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS, STORE_REQUEST_LOG, STORE_META], 'readonly');
+  const [people, actions, requestLog, metaRows] = await Promise.all([
+    tx.objectStore(STORE_PEOPLE).getAll(),
+    tx.objectStore(STORE_ACTIONS).getAll(),
+    tx.objectStore(STORE_REQUEST_LOG).getAll(),
+    tx.objectStore(STORE_META).getAll(),
+    tx.done,
+  ]);
+  return { people, actions, requestLog, meta: Object.fromEntries(metaRows.map((row) => [row.key, row.value])) };
+}
+
 export async function wipeAll(): Promise<void> {
   const db = await openDb();
   const stores = [STORE_PEOPLE, STORE_ACTIONS, STORE_REQUEST_LOG, STORE_META] as const;
@@ -133,13 +170,15 @@ export async function cancelIfQueued(id: number): Promise<boolean> {
   return true;
 }
 
-// Reads the person in the same transaction so an undo can never slip between the check and the claim.
+// Reads the person and the mode in the same transaction, so neither an undo nor a switch to collecting
+// can slip between the check and the claim.
 export async function claimForSending(id: number): Promise<QueuedAction | null> {
   const db = await openDb();
-  const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS], 'readwrite');
+  const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS, STORE_META], 'readwrite');
   const actions = tx.objectStore(STORE_ACTIONS);
   const action = await actions.get(id);
-  if (action?.status !== 'queued') {
+  const mode = (await tx.objectStore(STORE_META).get(META_MODE))?.value as Mode | undefined;
+  if (action?.status !== 'queued' || mode !== 'sending') {
     await tx.done;
     return null;
   }
@@ -175,11 +214,22 @@ export async function requeueIfStillWanted(action: QueuedAction, patch: Partial<
   return true;
 }
 
-export async function recordDecision(person: Person, actions: QueuedAction[]): Promise<number[]> {
+// Patches the stored person rather than writing a copy, so fields the collector filled in meanwhile survive.
+export async function recordDecision(
+  personPk: string,
+  patch: { decision: Decision; decidedAt: number | null },
+  actions: QueuedAction[],
+): Promise<number[]> {
   const db = await openDb();
   const tx = db.transaction([STORE_PEOPLE, STORE_ACTIONS], 'readwrite');
+  const people = tx.objectStore(STORE_PEOPLE);
+  const person = await people.get(personPk);
+  if (!person) {
+    await tx.done;
+    return [];
+  }
   const [, ids] = await Promise.all([
-    tx.objectStore(STORE_PEOPLE).put(person),
+    people.put({ ...person, ...patch }),
     Promise.all(actions.map((action) => tx.objectStore(STORE_ACTIONS).add(action))),
     tx.done,
   ]);
