@@ -96,11 +96,10 @@ const followDates = $derived(
   class={clsx(
     'relative flex h-[440px] w-[340px] flex-col overflow-hidden rounded-card border border-line bg-surface',
     'shadow-[0_24px_60px_-12px_rgb(0_0_0_/_0.7)]',
-    'transition-[transform,opacity] duration-[180ms]',
     leaving === null && (entrance === 'return' ? 'animate-card-return' : 'animate-card-in'),
     leaving !== null && ['opacity-0', EXIT_TRANSFORMS[leaving]],
   )}
-  style="transition-timing-function: var(--ease-out)"
+  style="transition: translate 380ms var(--ease-swipe), rotate 380ms var(--ease-swipe), opacity 260ms linear 120ms"
   aria-label={displayName}
 >
   {#if backdrop}

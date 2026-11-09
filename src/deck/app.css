@@ -21,6 +21,8 @@
   --radius-control: 10px;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* The swipe travels on screen, so it eases in and out instead of snapping off. */
+  --ease-swipe: cubic-bezier(0.4, 0, 0.2, 1);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -238,11 +240,11 @@
 }
 
 @utility animate-card-in {
-  animation: card-in 200ms var(--ease-out);
+  animation: card-in 360ms var(--ease-out);
 }
 
 @utility animate-card-return {
-  animation: card-return 200ms var(--ease-out);
+  animation: card-return 360ms var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

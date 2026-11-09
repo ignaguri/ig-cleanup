@@ -24,7 +24,7 @@ import StatusFooter from './components/StatusFooter.svelte';
 import { decide, kick, undoLast } from './lib/decide';
 import { keyToCommand } from './lib/keyboard';
 
-const SLIDE_OUT_MS = 180;
+const SLIDE_OUT_MS = 380;
 const UNDO_NOTE_MS = 4000;
 
 let people = $state<Person[]>([]);
