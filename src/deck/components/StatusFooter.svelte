@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Tooltip } from 'bits-ui';
 import clsx from 'clsx';
 import { sentInLast24h } from '../../core/pacing';
 import { actionsByStatus, getMeta } from '../../db/db';
@@ -22,7 +23,9 @@ let { counts, selected, deckActive, mode, refreshKey, onSelectDeck, onSending }:
 
 let queued = $state(0);
 let sentToday = $state(0);
-let dailyCap = $state(DEFAULT_SETTINGS.dailyCap);
+let pace = $state<Settings>(DEFAULT_SETTINGS);
+const dailyCap = $derived(pace.dailyCap);
+const delayRange = $derived(`${pace.minDelayMs / 1000}-${pace.maxDelayMs / 1000} s`);
 let nextSendAt = $state<number | null>(null);
 let now = $state(Date.now());
 
@@ -33,6 +36,25 @@ const MODE_PILLS: Record<Mode, { label: string; tone: string }> = {
   collecting: { label: 'Collecting', tone: 'bg-warn-tint text-warn' },
   paused: { label: 'Paused', tone: 'bg-surface-2 text-muted' },
 };
+
+const explanation = $derived.by(() => {
+  if (effectiveMode === 'sending') {
+    return {
+      title: 'Sending is on',
+      body: `Your queued unfollows and removals go to Instagram one at a time, ${delayRange} apart, at most ${dailyCap} in 24 hours. Pausing stops after the one in flight, and nothing in the queue is lost.`,
+    };
+  }
+  if (effectiveMode === 'collecting') {
+    return {
+      title: 'Collecting',
+      body: 'Reading your followers, following and people in common from Instagram. Nothing is sent while this runs. Starting sending stops collecting first.',
+    };
+  }
+  return {
+    title: 'Sending is paused',
+    body: 'Your decisions keep queuing up here, but nothing goes to Instagram until you start sending.',
+  };
+});
 
 const nextLine = $derived.by(() => {
   if (effectiveMode !== 'sending') {
@@ -59,7 +81,7 @@ async function refresh() {
     now = Date.now();
     queued = queuedActions.length;
     sentToday = sentInLast24h(sentActions, now);
-    dailyCap = settings?.dailyCap ?? DEFAULT_SETTINGS.dailyCap;
+    pace = settings ?? DEFAULT_SETTINGS;
     nextSendAt = alarm?.scheduledTime ?? null;
   } catch (error) {
     log.warn('footer status refresh failed', error);
@@ -108,12 +130,36 @@ function percentDone(deck: DeckId): number {
   </nav>
 
   <div class="ml-auto flex items-center gap-4 px-5 text-sm">
-    <span class={clsx('inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium', MODE_PILLS[effectiveMode].tone)}>
-      <span
-        class={clsx('h-1.5 w-1.5 rounded-full bg-current', effectiveMode === 'sending' && 'shadow-[0_0_0_3px_rgb(74_222_128_/_0.2)]')}
-      ></span>
-      {MODE_PILLS[effectiveMode].label}
-    </span>
+    <Tooltip.Provider delayDuration={150}>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          class={clsx(
+            'press inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium',
+            MODE_PILLS[effectiveMode].tone,
+          )}
+          aria-label={`${explanation.title}. ${explanation.body}`}
+        >
+          <span
+            class={clsx(
+              'h-1.5 w-1.5 rounded-full bg-current',
+              effectiveMode === 'sending' && 'shadow-[0_0_0_3px_rgb(74_222_128_/_0.2)]',
+            )}
+          ></span>
+          {MODE_PILLS[effectiveMode].label}
+          <Icon name="info" size={12} class="opacity-70" />
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side="top"
+            sideOffset={10}
+            class="z-50 w-80 origin-(--bits-tooltip-content-transform-origin) rounded-xl border border-line bg-surface-2 p-4 text-sm shadow-[0_16px_40px_-8px_rgb(0_0_0_/_0.7)] data-[state=delayed-open]:animate-[tooltip-in_160ms_var(--ease-out)]"
+          >
+            <p class="font-medium text-text">{explanation.title}</p>
+            <p class="mt-1 text-soft">{explanation.body}</p>
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
     <span class="text-muted tabular-nums">{formatCount(queued)} queued</span>
     <span class="text-muted tabular-nums">{sentToday} / {dailyCap} today</span>
     {#if nextLine}
