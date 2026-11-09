@@ -79,8 +79,12 @@ export async function actionsByStatus(status: ActionStatus): Promise<QueuedActio
   return (await openDb()).getAllFromIndex(STORE_ACTIONS, 'status', status);
 }
 
+export async function allActions(): Promise<QueuedAction[]> {
+  return (await openDb()).getAll(STORE_ACTIONS);
+}
+
 export async function actionsForPerson(pk: string): Promise<QueuedAction[]> {
-  const actions = await (await openDb()).getAll(STORE_ACTIONS);
+  const actions = await allActions();
   return actions.filter((action) => action.personPk === pk);
 }
 

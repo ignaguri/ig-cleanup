@@ -12,28 +12,34 @@ import { META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE } from '../shared/
 import { log } from '../shared/log';
 import type { AccountMeta, BlockInfo, CollectionState, Decision, DeckId, Mode, Person } from '../shared/types';
 import AccountMismatch from './components/AccountMismatch.svelte';
+import ActivityView from './components/ActivityView.svelte';
 import BlockBanner from './components/BlockBanner.svelte';
 import Card from './components/Card.svelte';
 import CollectionView from './components/CollectionView.svelte';
-import DeckSidebar from './components/DeckSidebar.svelte';
+import DeckControls from './components/DeckControls.svelte';
 import ErrorBanner from './components/ErrorBanner.svelte';
-import QueueStatus from './components/QueueStatus.svelte';
+import Icon from './components/Icon.svelte';
 import SettingsView from './components/SettingsView.svelte';
+import StatusFooter from './components/StatusFooter.svelte';
 import { decide, kick, undoLast } from './lib/decide';
 import { keyToCommand } from './lib/keyboard';
 
-const SLIDE_OUT_MS = 150;
+const SLIDE_OUT_MS = 180;
+const UNDO_NOTE_MS = 4000;
 
 let people = $state<Person[]>([]);
 let selectedDeck = $state<DeckId>('notFollowingBack');
-let leaving = $state(false);
-let busy = false;
+// Tied to the person, so the next card never mounts already exited.
+let leaving = $state<{ pk: string; decision: Decision } | null>(null);
+let entrance = $state<'next' | 'return'>('next');
+let busy = $state(false);
 let refreshSequence = 0;
 let errorMessage = $state('');
 let refreshKey = $state(0);
 let undoNotes = $state<string[]>([]);
+let undoNoteTimerId: ReturnType<typeof setTimeout> | undefined;
 
-type View = 'deck' | 'collection' | 'settings';
+type View = 'deck' | 'activity' | 'collection' | 'settings';
 type Gate =
   | { kind: 'loading' }
   | { kind: 'logged_out' }
@@ -42,6 +48,7 @@ type Gate =
 
 const VIEWS: { id: View; label: string }[] = [
   { id: 'deck', label: 'Deck' },
+  { id: 'activity', label: 'Activity' },
   { id: 'collection', label: 'Collection' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -54,7 +61,9 @@ let block = $state<BlockInfo | null>(null);
 let collector: CollectorHandle | null = null;
 
 const counts = $derived(deckCounts(people));
-const current = $derived(buildDeck(people, selectedDeck)[0] ?? null);
+const deck = $derived(buildDeck(people, selectedDeck));
+const current = $derived(deck[0] ?? null);
+const upNext = $derived(deck[1] ?? null);
 
 async function refresh() {
   refreshSequence += 1;
@@ -214,17 +223,15 @@ async function handleDecide(decision: Decision) {
   undoNotes = [];
   errorMessage = '';
   try {
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!reducedMotion) {
-      leaving = true;
-      await new Promise((resolve) => setTimeout(resolve, SLIDE_OUT_MS));
-    }
-    await decide(current.pk, decision);
+    // The exit plays while the decision is stored, so the next card is never held back by it.
+    leaving = { pk: current.pk, decision };
+    entrance = 'next';
+    await Promise.all([decide(current.pk, decision), new Promise((resolve) => setTimeout(resolve, SLIDE_OUT_MS))]);
     await refresh();
   } catch (error) {
     reportError(error);
   } finally {
-    leaving = false;
+    leaving = null;
     busy = false;
   }
 }
@@ -237,6 +244,7 @@ async function handleUndo() {
   errorMessage = '';
   try {
     const steps = await undoLast();
+    entrance = 'return';
     undoNotes = steps.flatMap((step) => {
       if (step.kind === 'refollow' && step.privateAccount) {
         return ['Follow request sent, not restored'];
@@ -246,12 +254,20 @@ async function handleUndo() {
       }
       return [];
     });
+    clearTimeout(undoNoteTimerId);
+    undoNoteTimerId = setTimeout(() => (undoNotes = []), UNDO_NOTE_MS);
     await refresh();
   } catch (error) {
     reportError(error);
   } finally {
     busy = false;
   }
+}
+
+function selectDeck(next: DeckId) {
+  selectedDeck = next;
+  entrance = 'next';
+  view = 'deck';
 }
 
 function openProfile() {
@@ -304,6 +320,7 @@ onMount(() => {
   }, 5000);
   return () => {
     clearInterval(intervalId);
+    clearTimeout(undoNoteTimerId);
     window.removeEventListener('unhandledrejection', onRejection);
     window.removeEventListener('error', onWindowError);
     window.removeEventListener('pagehide', stopCollectingInBackground);
@@ -314,82 +331,134 @@ onMount(() => {
 
 <svelte:window onkeydown={onKeydown} />
 
-{#if gate.kind === 'loading'}
-  <main class="flex min-h-screen items-center justify-center bg-bg text-muted">
-    <p>Loading</p>
+{#snippet gateScreen(message: string)}
+  <main class="flex min-h-screen flex-col items-center justify-center gap-4 bg-bg p-6 text-text">
     {#if errorMessage}
-      <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
+      <div class="w-full max-w-md"><ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} /></div>
     {/if}
+    <p class="text-base text-soft">{message}</p>
   </main>
+{/snippet}
+
+{#if gate.kind === 'loading'}
+  {@render gateScreen('Loading')}
 {:else if gate.kind === 'logged_out'}
-  {#if errorMessage}
-    <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
-  {/if}
-  <main class="flex min-h-screen items-center justify-center bg-bg p-6 text-text">
-    <p class="text-lg">Log in to instagram.com in this Chrome profile, then reload</p>
-  </main>
+  {@render gateScreen('Log in to instagram.com in this Chrome profile, then reload this tab')}
 {:else if gate.kind === 'mismatch'}
   {#if errorMessage}
     <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
   {/if}
   <AccountMismatch currentUserId={gate.currentUserId} storedUserId={gate.storedUserId} onStartNew={handleStartNew} />
 {:else}
-  <main class="flex min-h-screen flex-col gap-4 bg-bg p-6 text-text">
-    <nav class="flex gap-2 text-sm">
-      {#each VIEWS as item (item.id)}
-        <button
-          type="button"
-          class={clsx('rounded-card px-3 py-2', item.id === view ? 'bg-surface text-text' : 'text-muted')}
-          onclick={() => (view = item.id)}
-        >
-          {item.label}
-        </button>
-      {/each}
-    </nav>
-    {#if errorMessage}
-      <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
-    {/if}
-    {#if block}
-      <BlockBanner {block} onResume={handleResumeBlock} />
-    {/if}
-    {#if view === 'deck'}
-      <div class="flex flex-1 gap-6">
-        <section class="flex flex-1 flex-col items-center justify-center gap-4">
-          {#if current}
-            <Card person={current} {leaving} onDecide={handleDecide} />
-          {:else}
-            <p class="text-muted">Nothing left in this deck</p>
-          {/if}
-          {#each undoNotes as note (note)}
-            <p class="text-sm text-warn">{note}</p>
+  <div class="flex h-screen flex-col bg-bg text-text">
+    <header class="flex items-center justify-between gap-6 px-6 py-4">
+      <div class="flex items-center gap-6">
+        <span class="text-sm font-bold tracking-tight">IG Cleanup</span>
+        <nav class="flex gap-1" aria-label="Sections">
+          {#each VIEWS as item (item.id)}
+            <button
+              type="button"
+              class={clsx(
+                'press rounded-full px-3.5 py-1.5 text-sm',
+                item.id === view ? 'bg-surface-2 text-text' : 'text-muted hover:text-text',
+              )}
+              aria-current={item.id === view ? 'page' : undefined}
+              onclick={() => (view = item.id)}
+            >
+              {item.label}
+            </button>
           {/each}
-          <p class="text-sm text-muted">Undo: Z or Backspace</p>
-        </section>
-        <aside class="w-64 space-y-4">
-          <DeckSidebar {counts} selected={selectedDeck} onSelect={(deck) => (selectedDeck = deck)} />
-          <QueueStatus {mode} {refreshKey} />
-        </aside>
+        </nav>
       </div>
-    {:else if view === 'collection'}
-      <CollectionView
-        {collection}
-        {people}
-        {mode}
-        onStart={handleStartCollecting}
-        onPause={() => handleSendingMode('paused')}
-        onPauseAndSend={() => handleSendingMode('sending')}
-      />
-    {:else}
-      <SettingsView
-        {mode}
-        {refreshKey}
-        onPause={() => handleSendingMode('paused')}
-        onStartSending={() => handleSendingMode('sending')}
-        onRefreshPictures={handleRefreshPictures}
-        onStartNew={handleStartNew}
-        onError={reportError}
-        onImported={() => refresh().catch(reportError)}
-      />
+      {#if view === 'deck'}
+        <div class="flex items-center gap-4 text-xs text-muted">
+          <span class="flex items-center gap-1.5"><span class="kbd">←</span><span class="kbd">→</span> decide</span>
+          <span class="flex items-center gap-1.5"><span class="kbd">Z</span> undo</span>
+          {#if current}
+            <button type="button" class="press flex items-center gap-1.5 rounded-md hover:text-text" onclick={openProfile}>
+              <span class="kbd">↵</span> open profile <Icon name="external" size={12} />
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </header>
+
+    {#if errorMessage || block}
+      <div class="mx-auto w-full max-w-3xl space-y-3 px-6">
+        {#if errorMessage}
+          <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
+        {/if}
+        {#if block}
+          <BlockBanner {block} onResume={handleResumeBlock} />
+        {/if}
+      </div>
     {/if}
-  </main>
+
+    <main class="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-6">
+      {#if view === 'deck'}
+        <section class="flex flex-1 flex-col items-center justify-center gap-8">
+          {#if current}
+            <div class="relative">
+              {#if upNext}
+                <div
+                  class="absolute inset-0 translate-y-6 scale-[0.94] rounded-card border border-line bg-surface"
+                  aria-hidden="true"
+                ></div>
+              {/if}
+              {#key current.pk}
+                <Card person={current} leaving={leaving?.pk === current.pk ? leaving.decision : null} {entrance} />
+              {/key}
+            </div>
+            <DeckControls
+              decisions={availableDecisions(current)}
+              disabled={busy}
+              onDecide={handleDecide}
+              onUndo={handleUndo}
+            />
+          {:else}
+            <div class="flex flex-col items-center gap-3 text-center">
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-keep-tint text-keep">
+                <Icon name="check" size={22} />
+              </span>
+              <p class="text-lg font-semibold">This deck is done</p>
+              <p class="max-w-xs text-sm text-muted">Pick another deck below, or press Z to bring back the last one.</p>
+            </div>
+          {/if}
+          <div class="min-h-5" aria-live="polite">
+            {#each undoNotes as note (note)}
+              <p class="text-sm text-warn">{note}</p>
+            {/each}
+          </div>
+        </section>
+      {:else if view === 'activity'}
+        <ActivityView {people} {refreshKey} onError={reportError} />
+      {:else if view === 'collection'}
+        <CollectionView
+          {collection}
+          {people}
+          {mode}
+          onStart={handleStartCollecting}
+          onPause={() => handleSendingMode('paused')}
+        />
+      {:else}
+        <SettingsView
+          {mode}
+          onRefreshPictures={handleRefreshPictures}
+          onStartNew={handleStartNew}
+          onError={reportError}
+          onImported={() => refresh().catch(reportError)}
+        />
+      {/if}
+    </main>
+
+    <StatusFooter
+      {counts}
+      selected={selectedDeck}
+      deckActive={view === 'deck'}
+      {mode}
+      {refreshKey}
+      onSelectDeck={selectDeck}
+      onSending={handleSendingMode}
+    />
+  </div>
 {/if}

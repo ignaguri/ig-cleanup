@@ -1,15 +1,26 @@
 @import 'tailwindcss';
 
 :root {
-  --color-bg: #0f1115;
-  --color-surface: #1a1d24;
-  --color-text: #f2f3f5;
-  --color-muted: #8b919c;
-  --color-keep: #2ecc71;
-  --color-cut: #e5484d;
+  --color-bg: #0b0c10;
+  --color-raised: #101217;
+  --color-surface: #15171d;
+  --color-surface-2: #1c1f26;
+  --color-line: #23262f;
+  --color-line-strong: #343845;
+  --color-text: #eceef2;
+  --color-soft: #c3c7cf;
+  --color-muted: #8a909c;
+  --color-keep: #4ade80;
+  --color-keep-tint: #12241a;
+  --color-cut: #ff6b6b;
+  --color-cut-tint: #2a1416;
   --color-warn: #f5a524;
+  --color-warn-tint: #2a2010;
 
-  --radius-card: 16px;
+  --radius-card: 20px;
+  --radius-control: 10px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -18,29 +29,229 @@
   --space-5: 20px;
   --space-6: 24px;
 
-  --text-sm: 0.875rem;
-  --text-base: 1rem;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
   --text-lg: 1.25rem;
-  --text-xl: 1.75rem;
+  --text-xl: 1.625rem;
+
+  color-scheme: dark;
 }
 
 @theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
   --color-bg: var(--color-bg);
+  --color-raised: var(--color-raised);
   --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-line: var(--color-line);
+  --color-line-strong: var(--color-line-strong);
   --color-text: var(--color-text);
+  --color-soft: var(--color-soft);
   --color-muted: var(--color-muted);
   --color-keep: var(--color-keep);
+  --color-keep-tint: var(--color-keep-tint);
   --color-cut: var(--color-cut);
+  --color-cut-tint: var(--color-cut-tint);
   --color-warn: var(--color-warn);
+  --color-warn-tint: var(--color-warn-tint);
   --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+  --ease-out: var(--ease-out);
   --spacing-1: var(--space-1);
   --spacing-2: var(--space-2);
   --spacing-3: var(--space-3);
   --spacing-4: var(--space-4);
   --spacing-5: var(--space-5);
   --spacing-6: var(--space-6);
+  --text-xs: var(--text-xs);
   --text-sm: var(--text-sm);
   --text-base: var(--text-base);
   --text-lg: var(--text-lg);
   --text-xl: var(--text-xl);
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Preflight resets buttons to the default cursor. */
+  button,
+  [role='button'],
+  label[for] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-text);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: rgb(74 222 128 / 0.3);
+    color: var(--color-text);
+  }
+
+  * {
+    scrollbar-color: var(--color-line-strong) transparent;
+    scrollbar-width: thin;
+  }
+
+  a {
+    text-underline-offset: 3px;
+  }
+}
+
+@layer components {
+  /* Shared pressable feel: quick press-in; hover changes only on pointer devices. */
+  .press {
+    transition-property: transform, background-color, border-color, color, box-shadow, opacity;
+    transition-duration: 160ms;
+    transition-timing-function: var(--ease-out);
+  }
+
+  .press:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .press:disabled {
+    opacity: 0.4;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    height: 34px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-control);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .btn-quiet {
+    background: var(--color-surface-2);
+    color: var(--color-text);
+    border: 1px solid var(--color-line);
+  }
+
+  .btn-primary {
+    background: var(--color-text);
+    color: var(--color-bg);
+  }
+
+  .btn-danger {
+    background: var(--color-cut-tint);
+    color: var(--color-cut);
+    border: 1px solid rgb(255 107 107 / 0.25);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .btn-quiet:hover:not(:disabled) {
+      background: var(--color-line);
+      border-color: var(--color-line-strong);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #ffffff;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: rgb(255 107 107 / 0.18);
+      border-color: rgb(255 107 107 / 0.45);
+    }
+  }
+
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 5px;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line-strong);
+    border-bottom-width: 2px;
+    font-size: var(--text-xs);
+    color: var(--color-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .field {
+    height: 34px;
+    width: 7rem;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-control);
+    background: var(--color-bg);
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    transition: border-color 160ms var(--ease-out);
+  }
+
+  .field:hover {
+    border-color: var(--color-line-strong);
+  }
+
+  .field:focus-visible {
+    outline: none;
+    border-color: var(--color-text);
+  }
+
+  .panel {
+    border-radius: 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0.6;
+    transform: translateY(14px) scale(0.94);
+  }
+}
+
+@keyframes card-return {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(1.03);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@utility animate-card-in {
+  animation: card-in 200ms var(--ease-out);
+}
+
+@utility animate-card-return {
+  animation: card-return 200ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-in,
+  .animate-card-return {
+    animation: fade-in 160ms ease;
+  }
+
+  .press:active:not(:disabled) {
+    transform: none;
+  }
 }

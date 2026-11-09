@@ -1,61 +1,58 @@
 <script lang="ts">
+import clsx from 'clsx';
+import { onMount } from 'svelte';
 import { applyExportDates, parseExport, readExportFiles } from '../../core/export';
-import { allPeople, getMeta, putPeople, type RequestLogRow, recentRequests, setMeta } from '../../db/db';
+import { allPeople, getMeta, putPeople, setMeta } from '../../db/db';
 import { DEFAULT_SETTINGS, META_SETTINGS } from '../../shared/constants';
 import { log } from '../../shared/log';
 import type { Mode, Settings } from '../../shared/types';
 import { kick } from '../lib/decide';
 import ConfirmDialog from './ConfirmDialog.svelte';
+import Icon from './Icon.svelte';
 
 type Props = {
   mode: Mode | undefined;
-  refreshKey: number;
-  onPause: () => void;
-  onStartSending: () => void;
   onRefreshPictures: () => void;
   onStartNew: () => void;
   onError: (error: unknown) => void;
   onImported: () => void;
 };
-let { mode, refreshKey, onPause, onStartSending, onRefreshPictures, onStartNew, onError, onImported }: Props = $props();
+let { mode, onRefreshPictures, onStartNew, onError, onImported }: Props = $props();
+
+const SAVED_NOTE_MS = 2000;
 
 let dailyCap = $state(DEFAULT_SETTINGS.dailyCap);
 let minDelaySeconds = $state(DEFAULT_SETTINGS.minDelayMs / 1000);
 let maxDelaySeconds = $state(DEFAULT_SETTINGS.maxDelayMs / 1000);
-let settingsMessage = $state('');
+let settingsMessage = $state<{ text: string; tone: 'ok' | 'error' } | null>(null);
 let importMessage = $state('');
-let requests = $state<RequestLogRow[]>([]);
 let confirmOpen = $state(false);
 let importing = $state(false);
-let loaded = false;
+let savedTimerId: ReturnType<typeof setTimeout> | undefined;
 
-async function loadSettings() {
-  const stored = await getMeta<Settings>(META_SETTINGS);
-  const settings = stored ?? DEFAULT_SETTINGS;
-  dailyCap = settings.dailyCap;
-  minDelaySeconds = settings.minDelayMs / 1000;
-  maxDelaySeconds = settings.maxDelayMs / 1000;
-}
+const collecting = $derived(mode === 'collecting');
 
-async function loadRequests() {
-  requests = await recentRequests();
-}
-
-$effect(() => {
-  refreshKey;
-  const work = loaded ? loadRequests() : Promise.all([loadSettings(), loadRequests()]);
-  loaded = true;
-  work.catch(onError);
+onMount(() => {
+  getMeta<Settings>(META_SETTINGS)
+    .then((stored) => {
+      const settings = stored ?? DEFAULT_SETTINGS;
+      dailyCap = settings.dailyCap;
+      minDelaySeconds = settings.minDelayMs / 1000;
+      maxDelaySeconds = settings.maxDelayMs / 1000;
+    })
+    .catch(onError);
+  return () => clearTimeout(savedTimerId);
 });
 
 async function saveSettings() {
+  clearTimeout(savedTimerId);
   const capValid = Number.isInteger(dailyCap) && dailyCap >= 1 && dailyCap <= 500;
   if (!capValid) {
-    settingsMessage = 'Daily cap must be a whole number from 1 to 500';
+    settingsMessage = { text: 'Daily cap must be a whole number from 1 to 500', tone: 'error' };
     return;
   }
   if (!(minDelaySeconds >= 10) || !(maxDelaySeconds >= minDelaySeconds)) {
-    settingsMessage = 'Min delay must be at least 10 s, and max delay at least the min';
+    settingsMessage = { text: 'Min delay must be at least 10 s, and max delay at least the min', tone: 'error' };
     return;
   }
   try {
@@ -65,7 +62,8 @@ async function saveSettings() {
       maxDelayMs: Math.round(maxDelaySeconds * 1000),
     });
     kick();
-    settingsMessage = 'Saved';
+    settingsMessage = { text: 'Saved', tone: 'ok' };
+    savedTimerId = setTimeout(() => (settingsMessage = null), SAVED_NOTE_MS);
   } catch (error) {
     onError(error);
   }
@@ -82,7 +80,7 @@ async function loadExport(event: Event) {
     const dates = parseExport(await readExportFiles(files));
     const { updated, matched, unmatched } = applyExportDates(await allPeople(), dates);
     await putPeople(updated);
-    importMessage = `Matched ${matched}, unmatched ${unmatched}`;
+    importMessage = `Follow dates added for ${matched} accounts, ${unmatched} not found`;
     onImported();
   } catch (error) {
     log.error('export import failed', error);
@@ -93,90 +91,111 @@ async function loadExport(event: Event) {
     importing = false;
   }
 }
+
+const FIELDS = [
+  { id: 'daily-cap', label: 'Daily cap', hint: 'Unfollows and removals per 24 hours', unit: 'per day' },
+  { id: 'min-delay', label: 'Min delay', hint: 'Shortest wait between two sends', unit: 's' },
+  { id: 'max-delay', label: 'Max delay', hint: 'Longest wait between two sends', unit: 's' },
+] as const;
 </script>
 
-<section class="mx-auto w-full max-w-xl space-y-6 text-sm">
+{#snippet sectionHeader(title: string, description: string)}
+  <div>
+    <h2 class="text-base font-semibold">{title}</h2>
+    <p class="mt-0.5 text-sm text-muted">{description}</p>
+  </div>
+{/snippet}
+
+<section class="mx-auto flex w-full max-w-xl flex-col gap-5 text-sm">
   <form
-    class="space-y-3 rounded-card bg-surface p-4"
+    class="panel space-y-5 p-6"
     onsubmit={(event) => {
       event.preventDefault();
       saveSettings();
     }}
   >
-    <h2 class="text-lg">Sending</h2>
-    <label class="flex items-center justify-between gap-3">
-      Daily cap
-      <input type="number" class="w-28 rounded-card bg-bg px-2 py-1" bind:value={dailyCap} />
-    </label>
-    <label class="flex items-center justify-between gap-3">
-      Min delay (s)
-      <input type="number" class="w-28 rounded-card bg-bg px-2 py-1" bind:value={minDelaySeconds} />
-    </label>
-    <label class="flex items-center justify-between gap-3">
-      Max delay (s)
-      <input type="number" class="w-28 rounded-card bg-bg px-2 py-1" bind:value={maxDelaySeconds} />
-    </label>
-    <div class="flex items-center gap-3">
-      <button type="submit" class="rounded-card bg-keep px-3 py-1 text-bg">Save</button>
-      {#if settingsMessage}
-        <span class="text-muted">{settingsMessage}</span>
-      {/if}
+    {@render sectionHeader('Sending pace', 'Each send waits a random time between the two delays.')}
+    <div class="divide-y divide-line">
+      {#each FIELDS as field (field.id)}
+        <div class="flex items-center justify-between gap-4 py-3 first:pt-0">
+          <label for={field.id}>
+            <span class="block text-text">{field.label}</span>
+            <span class="block text-xs text-muted">{field.hint}</span>
+          </label>
+          <span class="flex items-center gap-2">
+            {#if field.id === 'daily-cap'}
+              <input id={field.id} type="number" min="1" max="500" class="field" bind:value={dailyCap} />
+            {:else if field.id === 'min-delay'}
+              <input id={field.id} type="number" min="10" class="field" bind:value={minDelaySeconds} />
+            {:else}
+              <input id={field.id} type="number" min="10" class="field" bind:value={maxDelaySeconds} />
+            {/if}
+            <span class="w-12 text-xs text-muted">{field.unit}</span>
+          </span>
+        </div>
+      {/each}
     </div>
-    <div class="flex gap-3">
-      {#if mode === 'sending'}
-        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onPause}>Pause sending</button>
-      {:else}
-        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onStartSending}>Start sending</button>
-      {/if}
-      {#if (mode ?? 'paused') !== 'paused'}
-        <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onPause}>Pause</button>
+    <div class="flex items-center gap-3">
+      <button type="submit" class="press btn btn-primary">Save</button>
+      {#if settingsMessage}
+        <span
+          class={clsx('flex items-center gap-1.5', settingsMessage.tone === 'ok' ? 'text-keep' : 'text-cut')}
+          role="status"
+        >
+          {#if settingsMessage.tone === 'ok'}<Icon name="check" size={14} />{/if}
+          {settingsMessage.text}
+        </span>
       {/if}
     </div>
   </form>
 
-  <div class="space-y-3 rounded-card bg-surface p-4">
-    <h2 class="text-lg">Data</h2>
-    <label class="block space-y-1">
-      <span>Load export</span>
-      <input
-        type="file"
-        multiple
-        accept=".zip,.json"
-        disabled={mode === 'collecting' || importing}
-        onchange={loadExport}
-      />
-    </label>
-    {#if mode === 'collecting'}
-      <p class="text-muted">Pause collection before loading an export.</p>
-    {/if}
-    {#if importing}
-      <p class="text-muted">Importing…</p>
-    {/if}
-    {#if importMessage}
-      <p class="text-muted">{importMessage}</p>
-    {/if}
-    <div class="flex gap-3">
-      <button type="button" class="rounded-card bg-bg px-3 py-1" onclick={onRefreshPictures}>Refresh pictures</button>
-      <button type="button" class="rounded-card bg-cut px-3 py-1" onclick={() => (confirmOpen = true)}>
-        Start a new cleanup
+  <div class="panel space-y-5 p-6">
+    {@render sectionHeader('Data', 'Add follow dates from an Instagram export, or reload profile pictures.')}
+    <div class="flex flex-wrap items-center gap-3">
+      <label
+        class={clsx(
+          'press btn btn-quiet has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-text',
+          (collecting || importing) && 'pointer-events-none opacity-40')}
+        aria-disabled={collecting || importing}
+      >
+        <Icon name="upload" size={14} />
+        {importing ? 'Importing…' : 'Load export (.zip or .json)'}
+        <input
+          type="file"
+          multiple
+          accept=".zip,.json"
+          class="sr-only"
+          disabled={collecting || importing}
+          onchange={loadExport}
+        />
+      </label>
+      <button type="button" class="press btn btn-quiet" onclick={onRefreshPictures}>
+        <Icon name="refresh" size={14} /> Refresh pictures
       </button>
     </div>
+    {#if collecting}
+      <p class="text-xs text-muted">Pause collection before loading an export.</p>
+    {/if}
+    {#if importMessage}
+      <p class="text-soft" role="status">{importMessage}</p>
+    {/if}
   </div>
 
-  <div class="space-y-2 rounded-card bg-surface p-4">
-    <h2 class="text-lg">Last requests</h2>
-    {#each requests as row (row.id)}
-      <p class="text-muted">{row.endpoint} | {row.status ?? '-'} | {row.outcome} | {new Date(row.at).toLocaleString()}</p>
-    {:else}
-      <p class="text-muted">No requests yet</p>
-    {/each}
+  <div class="space-y-4 rounded-2xl border border-cut/25 p-6">
+    {@render sectionHeader(
+      'Start over',
+      'Deletes every collected account, decision and queued send in this browser. Nothing changes on Instagram.',
+    )}
+    <button type="button" class="press btn btn-danger" onclick={() => (confirmOpen = true)}>
+      <Icon name="trash" size={14} /> Start a new cleanup
+    </button>
   </div>
 </section>
 
 <ConfirmDialog
   bind:open={confirmOpen}
   title="Start a new cleanup?"
-  description="This deletes all collected people, decisions and the queue."
+  description="This deletes all collected people, decisions and the queue. It can't be undone."
   confirmLabel="Delete and start new"
   onConfirm={onStartNew}
 />

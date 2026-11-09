@@ -6,12 +6,17 @@ let { currentUserId, storedUserId, onStartNew }: Props = $props();
 let confirmOpen = $state(false);
 </script>
 
-<main class="flex min-h-screen flex-col items-center justify-center gap-4 bg-bg p-6 text-text">
-  <p class="text-lg">Logged in as user {currentUserId}, this cleanup belongs to user {storedUserId}.</p>
-  <p class="text-sm text-muted">Switch back to the original account in instagram.com, or start over.</p>
-  <button type="button" class="rounded-card bg-cut px-4 py-2" onclick={() => (confirmOpen = true)}>
-    Start a new cleanup for user {currentUserId}
-  </button>
+<main class="flex min-h-screen items-center justify-center bg-bg p-6 text-text">
+  <div class="panel w-full max-w-md space-y-4 p-6">
+    <h1 class="text-lg font-semibold">This cleanup belongs to another account</h1>
+    <p class="text-sm text-soft">
+      You're logged in as user {currentUserId}, but the data here was collected for user {storedUserId}. Switch back to
+      that account on instagram.com, or start over for this one.
+    </p>
+    <button type="button" class="press btn btn-danger" onclick={() => (confirmOpen = true)}>
+      Start a new cleanup for user {currentUserId}
+    </button>
+  </div>
 </main>
 
 <ConfirmDialog
