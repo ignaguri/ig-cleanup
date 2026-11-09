@@ -6,11 +6,21 @@ import { checkAccount } from '../core/account-guard';
 import { collectionProgress, INITIAL_COLLECTION, nextListStep } from '../core/collection';
 import { availableDecisions } from '../core/decisions';
 import { buildDeck, deckCounts, deckOf } from '../core/people';
+import { isUnsettledInRescan } from '../core/rescan';
 import { allPeople, getMeta, setMeta, wipeAll } from '../db/db';
 import { readSession, readUsername } from '../instagram/transport';
-import { IG_ORIGIN, META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE } from '../shared/constants';
+import { IG_ORIGIN, META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE, META_SCANS } from '../shared/constants';
 import { log } from '../shared/log';
-import type { AccountMeta, BlockInfo, CollectionState, Decision, DeckId, Mode, Person } from '../shared/types';
+import type {
+  AccountMeta,
+  BlockInfo,
+  CollectionState,
+  Decision,
+  DeckId,
+  Mode,
+  Person,
+  ScanSummary,
+} from '../shared/types';
 import AccountMismatch from './components/AccountMismatch.svelte';
 import ActivityView from './components/ActivityView.svelte';
 import BlockBanner from './components/BlockBanner.svelte';
@@ -59,24 +69,32 @@ let view = $state<View>('deck');
 let collection = $state<CollectionState>(INITIAL_COLLECTION);
 let mode = $state<Mode | undefined>(undefined);
 let block = $state<BlockInfo | null>(null);
+let scans = $state<ScanSummary[]>([]);
 let collector: CollectorHandle | null = null;
 
-const counts = $derived(deckCounts(people));
-const deck = $derived(buildDeck(people, selectedDeck));
+// People first seen in a rescan wait for the following list, or someone I follow back would look like a fan.
+const deckPeople = $derived(
+  people.filter((person) => !isUnsettledInRescan(person, collection.rescan, collection.following.done)),
+);
+const counts = $derived(deckCounts(deckPeople));
+const deck = $derived(buildDeck(deckPeople, selectedDeck));
 const current = $derived(deck[0] ?? null);
 const upNext = $derived(deck[1] ?? null);
 // Until both lists are read every follower looks like a fan, so the decks stay closed. A picture refresh
-// re-reads the lists but keeps the relationships, so it doesn't close them.
-const listsPending = $derived(nextListStep(collection) !== null && !collection.refreshingPictures);
+// or a rescan re-reads the lists but keeps the relationships, so they don't close them.
+const listsPending = $derived(
+  nextListStep(collection) !== null && !collection.refreshingPictures && (collection.rescan ?? null) === null,
+);
 
 async function refresh() {
   refreshSequence += 1;
   const sequence = refreshSequence;
-  const [loaded, storedCollection, storedMode, storedBlock] = await Promise.all([
+  const [loaded, storedCollection, storedMode, storedBlock, storedScans] = await Promise.all([
     allPeople(),
     getMeta<CollectionState>(META_COLLECTION),
     getMeta<Mode>(META_MODE),
     getMeta<BlockInfo | null>(META_BLOCK),
+    getMeta<ScanSummary[]>(META_SCANS),
   ]);
   if (sequence !== refreshSequence) {
     return;
@@ -85,6 +103,7 @@ async function refresh() {
   collection = storedCollection ?? INITIAL_COLLECTION;
   mode = storedMode;
   block = storedBlock ?? null;
+  scans = storedScans ?? [];
   refreshKey += 1;
 }
 
@@ -134,26 +153,20 @@ async function handleSendingMode(next: 'sending' | 'paused') {
   }
 }
 
-async function handleRefreshPictures() {
+// Picture refreshes and rescans both re-read the lists from the start; one already running is resumed.
+async function rereadLists(startPatch: (stored: CollectionState) => Promise<Partial<CollectionState>>) {
   try {
     // Stop first: the collector overwrites META_COLLECTION from memory.
     await stopCollecting();
     const storedCollection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
-    if (storedCollection.refreshingPictures) {
-      await setMode('collecting');
-      startCollecting();
-      view = 'collection';
-      return;
+    if (!storedCollection.refreshingPictures && !storedCollection.rescan) {
+      await setMeta<CollectionState>(META_COLLECTION, {
+        ...storedCollection,
+        followers: INITIAL_COLLECTION.followers,
+        following: INITIAL_COLLECTION.following,
+        ...(await startPatch(storedCollection)),
+      });
     }
-    const currentMode = (await getMeta<Mode>(META_MODE)) ?? 'paused';
-    await setMeta<CollectionState>(META_COLLECTION, {
-      ...storedCollection,
-      followers: INITIAL_COLLECTION.followers,
-      following: INITIAL_COLLECTION.following,
-      refreshingPictures: true,
-      // The loop ends with the refresh, so never come back to 'collecting' without a running loop.
-      modeBeforeRefresh: currentMode === 'collecting' ? 'paused' : currentMode,
-    });
     await setMode('collecting');
     startCollecting();
     await refresh();
@@ -161,6 +174,22 @@ async function handleRefreshPictures() {
   } catch (error) {
     reportError(error);
   }
+}
+
+function handleRefreshPictures() {
+  return rereadLists(async () => {
+    const currentMode = (await getMeta<Mode>(META_MODE)) ?? 'paused';
+    // The loop ends with the refresh, so never come back to 'collecting' without a running loop.
+    return { refreshingPictures: true, modeBeforeRefresh: currentMode === 'collecting' ? 'paused' : currentMode };
+  });
+}
+
+// Compares the re-read lists with the stored ones; see core/rescan.
+function handleScanAgain() {
+  return rereadLists(async (stored) => {
+    const startedAt = Date.now();
+    return { rescan: { startedAt, previousAt: stored.listsCompletedAt ?? startedAt } };
+  });
 }
 
 async function handleResumeBlock() {
@@ -476,6 +505,8 @@ onMount(() => {
           {collection}
           {people}
           {mode}
+          {scans}
+          onScanAgain={handleScanAgain}
           onStart={handleStartCollecting}
           onPause={() => handleSendingMode('paused')}
         />

@@ -9,6 +9,7 @@ export const INITIAL_COLLECTION: CollectionState = {
   mutualsCompletedAt: null,
   refreshingPictures: false,
   modeBeforeRefresh: null,
+  rescan: null,
 };
 
 // Mutuals are only fetched for the two non-mutual decks: the shared budget is ~250 calls a day.

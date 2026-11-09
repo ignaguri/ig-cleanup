@@ -1,11 +1,11 @@
 <script lang="ts">
 import clsx from 'clsx';
 import { allActions, type RequestLogRow, recentRequests } from '../../db/db';
-import { IG_ORIGIN, REQUEST_LOG_SIZE } from '../../shared/constants';
+import { REQUEST_LOG_SIZE } from '../../shared/constants';
 import type { ActionStatus, ActionType, Decision, Person, QueuedAction } from '../../shared/types';
 import { formatCount, formatWhen } from '../lib/format';
 import { describeEndpoint } from '../lib/requests';
-import Avatar from './Avatar.svelte';
+import PersonCell from './PersonCell.svelte';
 
 type Props = { people: Person[]; refreshKey: number; onError: (error: unknown) => void };
 let { people, refreshKey, onError }: Props = $props();
@@ -114,26 +114,6 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 </script>
 
-{#snippet personCell(pk: string)}
-  {@const person = peopleByPk.get(pk)}
-  <div class="flex min-w-0 items-center gap-3">
-    <Avatar url={person?.picUrl ?? ''} name={person?.fullName || person?.username || '?'} class="h-8 w-8 shrink-0 text-[10px]" />
-    <div class="min-w-0">
-      {#if person}
-        <a
-          class="block truncate text-sm text-text hover:underline"
-          href={`${IG_ORIGIN}/${person.username}/`}
-          target="_blank"
-          rel="noreferrer">{person.fullName || person.username}</a
-        >
-        <span class="block truncate text-xs text-muted">@{person.username}</span>
-      {:else}
-        <span class="block truncate text-sm text-muted">Unknown account {pk}</span>
-      {/if}
-    </div>
-  </div>
-{/snippet}
-
 <section class="mx-auto flex w-full max-w-3xl flex-col gap-5">
   <div class="flex items-center gap-1 self-start rounded-full border border-line bg-raised p-1" role="tablist">
     {#each TABS as item (item.id)}
@@ -175,7 +155,7 @@ const TABS: { id: Tab; label: string }[] = [
           {#if sendFilter === 'upcoming'}
             <span class="w-6 shrink-0 text-right text-xs text-muted tabular-nums">{index + 1}</span>
           {/if}
-          <div class="min-w-0 flex-1">{@render personCell(action.personPk)}</div>
+          <div class="min-w-0 flex-1"><PersonCell person={peopleByPk.get(action.personPk)} pk={action.personPk} /></div>
           <span
             class={clsx(
               'shrink-0 rounded-md px-2 py-0.5 text-xs',
@@ -204,7 +184,7 @@ const TABS: { id: Tab; label: string }[] = [
     <ol class="panel divide-y divide-line overflow-hidden">
       {#each recentDecisions as person (person.pk)}
         <li class="flex items-center gap-4 px-4 py-3 hover:bg-surface-2/60">
-          <div class="min-w-0 flex-1">{@render personCell(person.pk)}</div>
+          <div class="min-w-0 flex-1"><PersonCell {person} pk={person.pk} /></div>
           <span class={clsx('shrink-0 rounded-md px-2 py-0.5 text-xs', DECISION_BADGES[person.decision].tone)}>
             {DECISION_BADGES[person.decision].label}
           </span>

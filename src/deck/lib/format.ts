@@ -1,4 +1,4 @@
-import type { AccountMeta } from '../../shared/types';
+import type { AccountMeta, TimeWindow } from '../../shared/types';
 
 const timeFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 const dayFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
@@ -51,4 +51,11 @@ export function formatCount(value: number): string {
 
 export function accountLabel(account: AccountMeta): string {
   return account.username !== null ? `@${account.username}` : `user ${account.userId}`;
+}
+
+// When something happened between two scans: "between 6 Nov and 9 Nov", or "on 9 Nov" within one day.
+export function formatWindow(timeWindow: TimeWindow): string {
+  const after = dayFormat.format(timeWindow.after);
+  const before = dayFormat.format(timeWindow.before);
+  return after === before ? `on ${before}` : `between ${after} and ${before}`;
 }

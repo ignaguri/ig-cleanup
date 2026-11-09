@@ -20,7 +20,15 @@ export type Person = {
   theyFollowedAt: number | null;
   decision: Decision;
   decidedAt: number | null;
+  // Missing on records from before rescans existed.
+  seenInFollowersAt?: number;
+  seenInFollowingAt?: number;
+  unfollowedMe?: TimeWindow | null;
+  startedFollowingMe?: TimeWindow | null;
 };
+
+// Somewhere between two scans; the exact moment isn't knowable.
+export type TimeWindow = { after: number; before: number };
 
 export type ActionType = 'unfollow' | 'remove' | 'follow';
 
@@ -67,6 +75,26 @@ export type CollectionState = {
   mutualsCompletedAt: number | null;
   refreshingPictures: boolean;
   modeBeforeRefresh: Mode | null;
+  rescan?: RescanState | null;
+};
+
+export type RescanState = {
+  startedAt: number;
+  previousAt: number;
+  followersDiffSkipped?: boolean;
+  followingDiffSkipped?: boolean;
+};
+
+export type ScanSummary = {
+  startedAt: number;
+  completedAt: number;
+  followers: number;
+  following: number;
+  lostFollowers: number;
+  newFollowers: number;
+  // A list came back much shorter than stored, so nobody was marked as gone from it.
+  followersDiffSkipped: boolean;
+  followingDiffSkipped?: boolean;
 };
 
 export type Settings = { dailyCap: number; minDelayMs: number; maxDelayMs: number };

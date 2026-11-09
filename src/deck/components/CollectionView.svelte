@@ -1,19 +1,33 @@
 <script lang="ts">
 import clsx from 'clsx';
 import { collectionProgress } from '../../core/collection';
-import { MUTUALS_DELAY_MS } from '../../shared/constants';
-import type { CollectionState, Mode, Person } from '../../shared/types';
+import { LIST_DELAY_MS, LIST_PAGE_SIZE, MUTUALS_DELAY_MS } from '../../shared/constants';
+import type { CollectionState, Mode, Person, ScanSummary } from '../../shared/types';
 import { formatCount, formatWhen } from '../lib/format';
+import FollowerChanges from './FollowerChanges.svelte';
 import Icon from './Icon.svelte';
 
 type Props = {
   collection: CollectionState;
   people: Person[];
   mode: Mode | undefined;
+  scans: ScanSummary[];
+  onScanAgain: () => void;
   onStart: () => void;
   onPause: () => void;
 };
-let { collection, people, mode, onStart, onPause }: Props = $props();
+let { collection, people, mode, scans, onScanAgain, onStart, onPause }: Props = $props();
+
+const lastScan = $derived(scans.at(-1) ?? null);
+
+// Both lists page by page at the list pace, plus roughly a second per request.
+const scanEstimateMs = $derived.by(() => {
+  const pages = (count: number) => Math.ceil(count / LIST_PAGE_SIZE);
+  const followers = people.filter((person) => person.followsMe).length;
+  const following = people.filter((person) => person.iFollow).length;
+  const perPageMs = (LIST_DELAY_MS[0] + LIST_DELAY_MS[1]) / 2 + 1000;
+  return (pages(followers) + pages(following)) * perPageMs;
+});
 
 const progress = $derived(collectionProgress(collection, people));
 const collecting = $derived(mode === 'collecting');
@@ -97,7 +111,29 @@ const detail = $derived.by(() => {
     {#if collection.refreshingPictures}
       <p class="flex items-center gap-2 text-sm text-soft"><Icon name="refresh" size={14} /> Refreshing pictures</p>
     {/if}
+    {#if collection.rescan}
+      <p class="flex items-center gap-2 text-sm text-soft">
+        <Icon name="refresh" size={14} /> Scanning again, comparing with {formatWhen(collection.rescan.previousAt, Date.now())}.
+        Decks stay open meanwhile.
+      </p>
+    {/if}
   </div>
+
+  {#if progress.phase === 'done' && !collection.refreshingPictures}
+    <div class="flex flex-wrap items-center gap-3">
+      <button type="button" class="press btn btn-quiet" onclick={onScanAgain}>
+        <Icon name="refresh" size={14} /> Scan again
+      </button>
+      <span class="text-sm text-muted">
+        Re-reads both lists (about {formatDuration(scanEstimateMs)}) to see who stopped following you. Sending stays off
+        until you turn it back on.
+      </span>
+    </div>
+  {/if}
+
+  {#if lastScan}
+    <FollowerChanges {people} {lastScan} />
+  {/if}
 
   {#if progress.phase !== 'done' || collection.refreshingPictures}
     <div class="flex items-center gap-3">
@@ -111,7 +147,11 @@ const detail = $derived.by(() => {
       {:else}
         <button type="button" class="press btn btn-primary" onclick={onStart}>
           <Icon name="play" size={14} />
-          {progress.phase === 'lists' && progress.listsSeen === 0 ? 'Start collection' : 'Resume collection'}
+          {#if collection.rescan}
+            Resume scan
+          {:else}
+            {progress.phase === 'lists' && progress.listsSeen === 0 ? 'Start collection' : 'Resume collection'}
+          {/if}
         </button>
       {/if}
     </div>

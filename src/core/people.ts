@@ -6,6 +6,9 @@ export function mergeListPage(
   users: IgUser[],
   list: 'followers' | 'following',
   startIndex: number,
+  seenAt: number,
+  // Previous scan's end during a rescan, so people who start following show up as new.
+  rescanSince: number | null,
 ): Person[] {
   const touched = new Map<string, Person>();
   users.forEach((user, position) => {
@@ -36,7 +39,12 @@ export function mergeListPage(
       picUrl: user.picUrl,
       isPrivate: user.isPrivate,
       isVerified: user.isVerified,
-      ...(list === 'followers' ? { followsMe: true } : { iFollow: true }),
+      ...(list === 'followers'
+        ? { followsMe: true, seenInFollowersAt: seenAt }
+        : { iFollow: true, seenInFollowingAt: seenAt }),
+      ...(list === 'followers' && rescanSince !== null && !base.followsMe
+        ? { startedFollowingMe: { after: rescanSince, before: seenAt }, unfollowedMe: null }
+        : {}),
     });
   });
   return [...touched.values()];

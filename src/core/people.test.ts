@@ -31,10 +31,10 @@ function person(overrides: Partial<Person> = {}): Person {
 describe('mergeListPage', () => {
   it('keeps the first listIndex when a pk shows up again', () => {
     const existing = new Map<string, Person>();
-    for (const p of mergeListPage(existing, [igUser('a'), igUser('b')], 'following', 0)) {
+    for (const p of mergeListPage(existing, [igUser('a'), igUser('b')], 'following', 0, 1, null)) {
       existing.set(p.pk, p);
     }
-    for (const p of mergeListPage(existing, [igUser('c'), igUser('a')], 'following', 2)) {
+    for (const p of mergeListPage(existing, [igUser('c'), igUser('a')], 'following', 2, 1, null)) {
       existing.set(p.pk, p);
     }
     expect(existing.size).toBe(3);
@@ -44,19 +44,31 @@ describe('mergeListPage', () => {
 
   it('marks both flags across the followers and following lists', () => {
     const existing = new Map<string, Person>();
-    for (const p of mergeListPage(existing, [igUser('a')], 'followers', 0)) {
+    for (const p of mergeListPage(existing, [igUser('a')], 'followers', 0, 1, null)) {
       existing.set(p.pk, p);
     }
-    const [merged] = mergeListPage(existing, [igUser('a')], 'following', 0);
+    const [merged] = mergeListPage(existing, [igUser('a')], 'following', 0, 1, null);
     expect(merged.iFollow).toBe(true);
     expect(merged.followsMe).toBe(true);
   });
 
   it('keeps an existing decision', () => {
     const existing = new Map([['a', person({ pk: 'a', decision: 'keep', decidedAt: 5 })]]);
-    const [merged] = mergeListPage(existing, [igUser('a')], 'followers', 9);
+    const [merged] = mergeListPage(existing, [igUser('a')], 'followers', 9, 1, null);
     expect(merged.decision).toBe('keep');
     expect(merged.decidedAt).toBe(5);
+  });
+
+  it('marks someone as a new follower only during a rescan', () => {
+    const existing = new Map([['a', person({ pk: 'a', iFollow: true, unfollowedMe: { after: 1, before: 2 } })]]);
+    expect(mergeListPage(existing, [igUser('a')], 'followers', 0, 9, null)[0].startedFollowingMe).toBeUndefined();
+    expect(mergeListPage(existing, [igUser('a')], 'following', 0, 9, 5)[0].startedFollowingMe).toBeUndefined();
+    const follower = new Map([['b', person({ pk: 'b', followsMe: true })]]);
+    expect(mergeListPage(follower, [igUser('b')], 'followers', 0, 9, 5)[0].startedFollowingMe).toBeUndefined();
+    const [merged] = mergeListPage(existing, [igUser('a')], 'followers', 0, 9, 5);
+    expect(merged.startedFollowingMe).toEqual({ after: 5, before: 9 });
+    expect(merged.unfollowedMe).toBeNull();
+    expect(merged.seenInFollowersAt).toBe(9);
   });
 });
 

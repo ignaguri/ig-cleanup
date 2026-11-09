@@ -14,6 +14,7 @@ export const META_BLOCK = 'block';
 export const META_COLLECTION = 'collection';
 export const META_SETTINGS = 'settings';
 export const META_LAST_SENT_AT = 'lastSentAt';
+export const META_SCANS = 'scans';
 
 export const IG_ORIGIN = 'https://www.instagram.com';
 export const IG_APP_ID = '936619743392459';

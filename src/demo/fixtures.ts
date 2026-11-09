@@ -9,6 +9,7 @@ import type {
   MutualPreview,
   Person,
   QueuedAction,
+  ScanSummary,
   Settings,
 } from '../shared/types';
 
@@ -26,6 +27,7 @@ export type DemoData = {
     block: BlockInfo | null;
     collection: CollectionState;
     settings: Settings;
+    scans: ScanSummary[];
   };
 };
 
@@ -192,6 +194,34 @@ export function buildDemoData(scenario: Scenario, now: number): DemoData {
     }
   }
 
+  // A rescan a day ago: a few people left (two of them now in "Doesn't follow you back"), two are new.
+  const scans: ScanSummary[] = [];
+  if (scenario === 'default') {
+    const scan = { startedAt: now - DAY, previousAt: now - 8 * DAY };
+    const timeWindow = { after: scan.previousAt, before: scan.startedAt + 20 * 60_000 };
+    const undecided = people.filter((person) => person.decision === 'undecided');
+    const leavers = [
+      ...undecided.filter((person) => person.iFollow && person.followsMe).slice(0, 2),
+      ...undecided.filter((person) => !person.iFollow && person.followsMe).slice(0, 1),
+    ];
+    for (const person of leavers) {
+      person.followsMe = false;
+      person.unfollowedMe = timeWindow;
+    }
+    for (const person of undecided.filter((person) => person.followsMe && !person.iFollow).slice(0, 2)) {
+      person.startedFollowingMe = timeWindow;
+    }
+    scans.push({
+      ...scan,
+      completedAt: scan.startedAt + 25 * 60_000,
+      followers: people.filter((person) => person.followsMe).length,
+      following: people.filter((person) => person.iFollow).length,
+      lostFollowers: leavers.length,
+      newFollowers: 2,
+      followersDiffSkipped: false,
+    });
+  }
+
   return {
     people,
     actions,
@@ -212,6 +242,7 @@ export function buildDemoData(scenario: Scenario, now: number): DemoData {
           : null,
       collection,
       settings: { dailyCap: 20, minDelayMs: 30_000, maxDelayMs: 90_000 },
+      scans,
     },
   };
 }

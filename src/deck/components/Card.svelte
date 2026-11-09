@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { fetchesMutuals } from '../../core/collection';
 import { deckOf } from '../../core/people';
 import type { Decision, DeckId, Person } from '../../shared/types';
-import { formatMonth } from '../lib/format';
+import { formatMonth, formatWindow } from '../lib/format';
 import { EXIT_MS } from '../lib/motion';
 import { loadPicture } from '../lib/pictures';
 import Avatar from './Avatar.svelte';
@@ -162,9 +162,20 @@ const followDates = $derived(
       </p>
     </div>
 
-    <span class={clsx('inline-flex rounded-md px-2 py-0.5 text-xs font-medium', relationship.tone)}>
-      {relationship.label}
-    </span>
+    <div class="flex flex-wrap gap-1.5">
+      <span class={clsx('inline-flex rounded-md px-2 py-0.5 text-xs font-medium', relationship.tone)}>
+        {relationship.label}
+      </span>
+      {#if person.unfollowedMe}
+        <span class="inline-flex rounded-md bg-cut/15 px-2 py-0.5 text-xs font-medium text-cut">
+          Unfollowed you {formatWindow(person.unfollowedMe)}
+        </span>
+      {:else if person.startedFollowingMe}
+        <span class="inline-flex rounded-md bg-keep/15 px-2 py-0.5 text-xs font-medium text-keep">
+          New follower {formatWindow(person.startedFollowingMe)}
+        </span>
+      {/if}
+    </div>
 
     {#if mutualsLine !== null}
       <div class="flex items-center gap-2.5 text-sm text-soft">

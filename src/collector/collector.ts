@@ -1,7 +1,14 @@
 import { INITIAL_COLLECTION, nextListStep, nextMutualsTarget, skipsMutuals429 } from '../core/collection';
 import { randomDelay } from '../core/pacing';
 import { mergeListPage } from '../core/people';
-import { actionsByStatus, allPeople, getMeta, mergePeople, recentRequests, setMeta } from '../db/db';
+import {
+  dropMissingFollowers,
+  dropMissingFollowing,
+  followersDiffLooksWrong,
+  followingDiffLooksWrong,
+  summarizeScan,
+} from '../core/rescan';
+import { actionsByStatus, allActions, allPeople, getMeta, mergePeople, recentRequests, setMeta } from '../db/db';
 import { kick } from '../deck/lib/decide';
 import { fetchFollowersPage, fetchFollowingPage, fetchMutuals, sessionBlock } from '../instagram/client';
 import { blockFromError, IgBlockedError, IgNotFoundError, IgRetryableError, IgShapeError } from '../instagram/errors';
@@ -13,10 +20,21 @@ import {
   META_BLOCK,
   META_COLLECTION,
   META_MODE,
+  META_SCANS,
   MUTUALS_DELAY_MS,
 } from '../shared/constants';
 import { log } from '../shared/log';
-import type { AccountMeta, BlockInfo, CollectionState, Mode, MutualPreview } from '../shared/types';
+import type {
+  AccountMeta,
+  ActionType,
+  BlockInfo,
+  CollectionState,
+  Mode,
+  MutualPreview,
+  Person,
+  RescanState,
+  ScanSummary,
+} from '../shared/types';
 
 export type CollectorHandle = { stop(): Promise<void> };
 
@@ -105,6 +123,47 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
     onUpdate();
   }
 
+  // Applies a diff to the stored records, so decisions made meanwhile survive.
+  async function applyDiff(diff: (people: Person[]) => Person[]): Promise<void> {
+    const pks = diff(await allPeople()).map((person) => person.pk);
+    if (pks.length > 0) {
+      await mergePeople(pks, (current) => diff([...current.values()]));
+    }
+  }
+
+  // A write that failed with "check on Instagram" may still have gone out, so failed ones count too.
+  async function actedOnPks(type: ActionType): Promise<Set<string>> {
+    const actions = await allActions();
+    return new Set(
+      actions
+        .filter((action) => action.type === type && (action.status === 'sent' || action.status === 'failed'))
+        .map((action) => action.personPk),
+    );
+  }
+
+  async function finishFollowersPass(scan: RescanState): Promise<boolean> {
+    const removedPks = await actedOnPks('remove');
+    if (followersDiffLooksWrong(await allPeople(), scan, removedPks)) {
+      log.warn('followers list came back much shorter than stored, not marking anyone as gone');
+      return true;
+    }
+    const now = Date.now();
+    await applyDiff((people) => dropMissingFollowers(people, scan, now, removedPks));
+    return false;
+  }
+
+  async function finishRescan(scan: RescanState): Promise<void> {
+    const followingDiffSkipped = followingDiffLooksWrong(await allPeople(), scan, await actedOnPks('unfollow'));
+    if (followingDiffSkipped) {
+      log.warn('following list came back much shorter than stored, not dropping anyone from it');
+    } else {
+      await applyDiff((people) => dropMissingFollowing(people, scan));
+    }
+    const summary = summarizeScan(await allPeople(), { ...scan, followingDiffSkipped }, Date.now());
+    const scans = (await getMeta<ScanSummary[]>(META_SCANS)) ?? [];
+    await setMeta<ScanSummary[]>(META_SCANS, [...scans, summary]);
+  }
+
   async function run(): Promise<void> {
     let stepLabel = 'setup';
     try {
@@ -190,7 +249,11 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
                 }),
               );
             } else {
-              await mergePeople(pagePks, (current) => mergeListPage(current, page.users, listStep, cursor.seen));
+              const seenAt = Date.now();
+              const rescanSince = collection.rescan?.previousAt ?? null;
+              await mergePeople(pagePks, (current) =>
+                mergeListPage(current, page.users, listStep, cursor.seen, seenAt, rescanSince),
+              );
             }
             const updatedCursor = {
               done: page.nextMaxId === null,
@@ -198,8 +261,18 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
               seen: cursor.seen + page.users.length,
             };
             collection = { ...collection, [listStep]: updatedCursor };
+            const scan = collection.rescan ?? null;
+            if (scan !== null && updatedCursor.done && listStep === 'followers') {
+              const skipped = await finishFollowersPass(scan);
+              collection = { ...collection, rescan: { ...scan, followersDiffSkipped: skipped } };
+            }
             if (listStep === 'following' && updatedCursor.done && !collection.refreshingPictures) {
               collection = { ...collection, listsCompletedAt: Date.now() };
+              if (scan !== null) {
+                await finishRescan(scan);
+                // New people get their people in common next.
+                collection = { ...collection, rescan: null, mutualsCompletedAt: null };
+              }
             }
             if (collection.refreshingPictures && nextListStep(collection) === null) {
               await finishRefresh(collection);

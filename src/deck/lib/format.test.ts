@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRelative, formatWhen } from './format';
+import { formatRelative, formatWhen, formatWindow } from './format';
 
 const now = new Date(2026, 10, 9, 12, 0).getTime();
 
@@ -21,5 +21,13 @@ describe('formatRelative', () => {
     expect(formatRelative(now - 2 * 60_000, now)).toBe('2 min ago');
     expect(formatRelative(now + 10_000, now)).toBe('now');
     expect(formatRelative(now + 2 * 3_600_000, now)).toBe('14:00');
+  });
+});
+
+describe('formatWindow', () => {
+  it('names both days, or one when they match', () => {
+    const day = (date: number, hour: number) => new Date(2026, 10, date, hour).getTime();
+    expect(formatWindow({ after: day(6, 9), before: day(9, 12) })).toBe('between 6 Nov and 9 Nov');
+    expect(formatWindow({ after: day(9, 9), before: day(9, 12) })).toBe('on 9 Nov');
   });
 });

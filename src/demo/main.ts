@@ -2,7 +2,7 @@ import { mount } from 'svelte';
 import { addActions, getMeta, logRequest, putPeople, setMeta, wipeAll } from '../db/db';
 import App from '../deck/App.svelte';
 import '../deck/app.css';
-import { META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE, META_SETTINGS } from '../shared/constants';
+import { META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE, META_SCANS, META_SETTINGS } from '../shared/constants';
 import { installFakeChrome } from './fake-chrome';
 import { buildDemoData, type Scenario } from './fixtures';
 
@@ -28,6 +28,7 @@ async function seed(scenario: Scenario) {
   await setMeta(META_BLOCK, data.meta.block);
   await setMeta(META_COLLECTION, data.meta.collection);
   await setMeta(META_SETTINGS, data.meta.settings);
+  await setMeta(META_SCANS, data.meta.scans);
   await setMeta(SEEDED_KEY, scenario);
 }
 
