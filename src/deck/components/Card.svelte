@@ -1,21 +1,23 @@
 <script lang="ts">
 import clsx from 'clsx';
-import type { Decision, Person } from '../../shared/types';
+import { fetchesMutuals } from '../../core/collection';
+import { deckOf } from '../../core/people';
+import type { Decision, DeckId, Person } from '../../shared/types';
 import { formatMonth } from '../lib/format';
-import { pictureUrl } from '../lib/pictures';
+import { EXIT_MS } from '../lib/motion';
+import { loadPicture } from '../lib/pictures';
 import Avatar from './Avatar.svelte';
 import Icon from './Icon.svelte';
 
 type Props = { person: Person; leaving: Decision | null; entrance: 'next' | 'return' };
 let { person, leaving, entrance }: Props = $props();
 
-// Reduced motion keeps only the fade.
 const EXIT_TRANSFORMS: Record<Decision, string> = {
-  keep: 'motion-safe:translate-x-[115%] motion-safe:rotate-[14deg]',
-  unfollow: 'motion-safe:-translate-x-[115%] motion-safe:-rotate-[14deg]',
-  remove: 'motion-safe:translate-y-[60%] motion-safe:rotate-[4deg]',
-  both: 'motion-safe:-translate-y-[60%] motion-safe:-rotate-[4deg]',
-  undecided: '',
+  keep: 'translateX(115%) rotate(14deg)',
+  unfollow: 'translateX(-115%) rotate(-14deg)',
+  remove: 'translateY(60%) rotate(4deg)',
+  both: 'translateY(-60%) rotate(-4deg)',
+  undecided: 'none',
 };
 
 const STAMPS: Record<Decision, { label: string; tone: string; side: string }> = {
@@ -26,7 +28,30 @@ const STAMPS: Record<Decision, { label: string; tone: string; side: string }> = 
   undecided: { label: '', tone: '', side: '' },
 };
 
+let cardElement: HTMLElement | undefined = $state();
 let backdrop = $state<string | null>(null);
+
+// WAAPI, so a decision made while the card is still entering starts from where it visibly is.
+$effect(() => {
+  if (!cardElement || leaving === null) {
+    return;
+  }
+  const element = cardElement;
+  const { transform, opacity } = getComputedStyle(element);
+  for (const running of element.getAnimations()) {
+    running.cancel();
+  }
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const exitTransform = reducedMotion ? transform : EXIT_TRANSFORMS[leaving];
+  element.animate(
+    [
+      { transform, opacity, offset: 0 },
+      { opacity, offset: 0.3 },
+      { transform: exitTransform, opacity: 0, offset: 1 },
+    ],
+    { duration: EXIT_MS, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' },
+  );
+});
 
 $effect(() => {
   const url = person.picUrl;
@@ -34,30 +59,21 @@ $effect(() => {
   if (!url) {
     return;
   }
-  let cancelled = false;
-  pictureUrl(url)
-    .then((blobUrl) => {
-      if (!cancelled) {
-        backdrop = blobUrl;
-      }
-    })
-    .catch(() => {});
-  return () => {
-    cancelled = true;
-  };
+  return loadPicture(url, (blobUrl) => {
+    backdrop = blobUrl;
+  });
 });
 
 const displayName = $derived(person.fullName.trim() || person.username);
 
-const relationship = $derived.by(() => {
-  if (person.iFollow && person.followsMe) {
-    return { label: 'You follow each other', tone: 'bg-surface-2 text-soft' };
-  }
-  if (person.iFollow) {
-    return { label: "Doesn't follow you back", tone: 'bg-cut/15 text-cut' };
-  }
-  return { label: "Follows you, you don't follow back", tone: 'bg-warn/15 text-warn' };
-});
+const RELATIONSHIPS: Record<DeckId, { label: string; tone: string }> = {
+  mutual: { label: 'You follow each other', tone: 'bg-surface-2 text-soft' },
+  notFollowingBack: { label: "Doesn't follow you back", tone: 'bg-cut/15 text-cut' },
+  fansNotFollowed: { label: "Follows you, you don't follow back", tone: 'bg-warn/15 text-warn' },
+};
+
+// Cards only show people from a deck, so deckOf is never null here.
+const relationship = $derived(RELATIONSHIPS[deckOf(person) ?? 'mutual']);
 
 const mutualsLine = $derived.by(() => {
   const mutuals = person.mutuals;
@@ -65,7 +81,7 @@ const mutualsLine = $derived.by(() => {
     if (person.mutualsFetchedAt !== null) {
       return 'People in common unavailable';
     }
-    if (person.iFollow && person.followsMe) {
+    if (!fetchesMutuals(person)) {
       return null;
     }
     return 'People in common load later';
@@ -96,10 +112,9 @@ const followDates = $derived(
   class={clsx(
     'relative flex h-[440px] w-[340px] flex-col overflow-hidden rounded-card border border-line bg-surface',
     'shadow-[0_24px_60px_-12px_rgb(0_0_0_/_0.7)]',
-    leaving === null && (entrance === 'return' ? 'animate-card-return' : 'animate-card-in'),
-    leaving !== null && ['opacity-0', EXIT_TRANSFORMS[leaving]],
+    entrance === 'return' ? 'animate-card-return' : 'animate-card-in',
   )}
-  style="transition: translate 380ms var(--ease-swipe), rotate 380ms var(--ease-swipe), opacity 260ms linear 120ms"
+  bind:this={cardElement}
   aria-label={displayName}
 >
   {#if backdrop}
@@ -155,7 +170,7 @@ const followDates = $derived(
       <div class="flex items-center gap-2.5 text-sm text-soft">
         {#if person.mutuals && person.mutuals.picUrls.length > 0}
           <div class="flex shrink-0">
-            {#each person.mutuals.picUrls.slice(0, 3) as url, index (url)}
+            {#each person.mutuals.picUrls.slice(0, 3) as url, index (index)}
               <Avatar
                 {url}
                 name={person.mutuals.usernames[index] ?? ''}

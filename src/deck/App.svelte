@@ -3,12 +3,12 @@ import clsx from 'clsx';
 import { onMount } from 'svelte';
 import { type CollectorHandle, startCollector } from '../collector/collector';
 import { checkAccount } from '../core/account-guard';
-import { collectionProgress, INITIAL_COLLECTION } from '../core/collection';
+import { collectionProgress, INITIAL_COLLECTION, nextListStep } from '../core/collection';
 import { availableDecisions } from '../core/decisions';
-import { buildDeck, deckCounts } from '../core/people';
+import { buildDeck, deckCounts, deckOf } from '../core/people';
 import { allPeople, getMeta, setMeta, wipeAll } from '../db/db';
 import { readSession } from '../instagram/transport';
-import { META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE } from '../shared/constants';
+import { IG_ORIGIN, META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE } from '../shared/constants';
 import { log } from '../shared/log';
 import type { AccountMeta, BlockInfo, CollectionState, Decision, DeckId, Mode, Person } from '../shared/types';
 import AccountMismatch from './components/AccountMismatch.svelte';
@@ -23,8 +23,8 @@ import SettingsView from './components/SettingsView.svelte';
 import StatusFooter from './components/StatusFooter.svelte';
 import { decide, kick, undoLast } from './lib/decide';
 import { keyToCommand } from './lib/keyboard';
+import { EXIT_MS } from './lib/motion';
 
-const SLIDE_OUT_MS = 380;
 const UNDO_NOTE_MS = 4000;
 
 let people = $state<Person[]>([]);
@@ -64,6 +64,9 @@ const counts = $derived(deckCounts(people));
 const deck = $derived(buildDeck(people, selectedDeck));
 const current = $derived(deck[0] ?? null);
 const upNext = $derived(deck[1] ?? null);
+// Until both lists are read every follower looks like a fan, so the decks stay closed. A picture refresh
+// re-reads the lists but keeps the relationships, so it doesn't close them.
+const listsPending = $derived(nextListStep(collection) !== null && !collection.refreshingPictures);
 
 async function refresh() {
   refreshSequence += 1;
@@ -136,7 +139,9 @@ async function handleRefreshPictures() {
     await stopCollecting();
     const storedCollection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
     if (storedCollection.refreshingPictures) {
+      await setMode('collecting');
       startCollecting();
+      view = 'collection';
       return;
     }
     const currentMode = (await getMeta<Mode>(META_MODE)) ?? 'paused';
@@ -216,7 +221,7 @@ function onWindowError(event: ErrorEvent) {
 }
 
 async function handleDecide(decision: Decision) {
-  if (!current || busy || !availableDecisions(current).includes(decision)) {
+  if (!current || busy || listsPending || !availableDecisions(current).includes(decision)) {
     return;
   }
   busy = true;
@@ -226,7 +231,7 @@ async function handleDecide(decision: Decision) {
     // The exit plays while the decision is stored, so the next card is never held back by it.
     leaving = { pk: current.pk, decision };
     entrance = 'next';
-    await Promise.all([decide(current.pk, decision), new Promise((resolve) => setTimeout(resolve, SLIDE_OUT_MS))]);
+    await Promise.all([decide(current.pk, decision), new Promise((resolve) => setTimeout(resolve, EXIT_MS))]);
     await refresh();
   } catch (error) {
     reportError(error);
@@ -243,7 +248,7 @@ async function handleUndo() {
   busy = true;
   errorMessage = '';
   try {
-    const steps = await undoLast();
+    const { personPk, steps } = await undoLast();
     entrance = 'return';
     undoNotes = steps.flatMap((step) => {
       if (step.kind === 'refollow' && step.privateAccount) {
@@ -257,6 +262,12 @@ async function handleUndo() {
     clearTimeout(undoNoteTimerId);
     undoNoteTimerId = setTimeout(() => (undoNotes = []), UNDO_NOTE_MS);
     await refresh();
+    // Undo can bring back someone from another deck: follow them there so the undo is visible.
+    const restored = people.find((person) => person.pk === personPk);
+    const restoredDeck = restored ? deckOf(restored) : null;
+    if (restoredDeck !== null && restoredDeck !== selectedDeck) {
+      selectedDeck = restoredDeck;
+    }
   } catch (error) {
     reportError(error);
   } finally {
@@ -272,7 +283,7 @@ function selectDeck(next: DeckId) {
 
 function openProfile() {
   if (current) {
-    window.open(`https://www.instagram.com/${current.username}/`, '_blank', 'noopener');
+    window.open(`${IG_ORIGIN}/${current.username}/`, '_blank', 'noopener');
   }
 }
 
@@ -397,7 +408,15 @@ onMount(() => {
     <main class="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-6">
       {#if view === 'deck'}
         <section class="flex flex-1 flex-col items-center justify-center gap-8">
-          {#if current}
+          {#if listsPending}
+            <div class="flex max-w-sm flex-col items-center gap-3 text-center">
+              <p class="text-lg font-semibold">Decks open once both lists are read</p>
+              <p class="text-sm text-muted">
+                Until your following list is in, everyone who follows you looks like a fan. Check progress in Collection.
+              </p>
+              <button type="button" class="press btn btn-quiet" onclick={() => (view = 'collection')}>Go to Collection</button>
+            </div>
+          {:else if current}
             <div class="relative">
               {#if upNext}
                 <div
