@@ -7,7 +7,7 @@ import { collectionProgress, INITIAL_COLLECTION, nextListStep } from '../core/co
 import { availableDecisions } from '../core/decisions';
 import { buildDeck, deckCounts, deckOf } from '../core/people';
 import { allPeople, getMeta, setMeta, wipeAll } from '../db/db';
-import { readSession } from '../instagram/transport';
+import { readSession, readUsername } from '../instagram/transport';
 import { IG_ORIGIN, META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE } from '../shared/constants';
 import { log } from '../shared/log';
 import type { AccountMeta, BlockInfo, CollectionState, Decision, DeckId, Mode, Person } from '../shared/types';
@@ -22,6 +22,7 @@ import Icon from './components/Icon.svelte';
 import SettingsView from './components/SettingsView.svelte';
 import StatusFooter from './components/StatusFooter.svelte';
 import { decide, kick, undoLast } from './lib/decide';
+import { accountLabel } from './lib/format';
 import { keyToCommand } from './lib/keyboard';
 import { EXIT_MS } from './lib/motion';
 
@@ -43,7 +44,7 @@ type View = 'deck' | 'activity' | 'collection' | 'settings';
 type Gate =
   | { kind: 'loading' }
   | { kind: 'logged_out' }
-  | { kind: 'mismatch'; currentUserId: string; storedUserId: string }
+  | { kind: 'mismatch'; current: AccountMeta; stored: AccountMeta }
   | { kind: 'ok' };
 
 const VIEWS: { id: View; label: string }[] = [
@@ -197,8 +198,15 @@ async function init() {
     return;
   }
   if (status === 'mismatch' && stored && currentUserId) {
-    gate = { kind: 'mismatch', currentUserId, storedUserId: stored.userId };
+    gate = { kind: 'mismatch', current: { userId: currentUserId, username: null }, stored };
+    const username = await readUsername(currentUserId, { openTab: false });
+    if (username !== null && gate.kind === 'mismatch') {
+      gate = { ...gate, current: { ...gate.current, username } };
+    }
     return;
+  }
+  if (stored && stored.username === null) {
+    rememberUsername(stored).catch((error) => log.warn('could not read username', error));
   }
   await refresh();
   const progress = collectionProgress(collection, people);
@@ -206,6 +214,14 @@ async function init() {
   gate = { kind: 'ok' };
   if (mode === 'collecting' && block === null) {
     startCollecting();
+  }
+}
+
+// Accounts collected before usernames were stored get theirs from an already open instagram.com tab.
+async function rememberUsername(stored: AccountMeta) {
+  const username = await readUsername(stored.userId, { openTab: false });
+  if (username !== null) {
+    await setMeta<AccountMeta>(META_ACCOUNT, { ...stored, username });
   }
 }
 
@@ -359,7 +375,11 @@ onMount(() => {
   {#if errorMessage}
     <ErrorBanner message={errorMessage} onDismiss={() => (errorMessage = '')} />
   {/if}
-  <AccountMismatch currentUserId={gate.currentUserId} storedUserId={gate.storedUserId} onStartNew={handleStartNew} />
+  <AccountMismatch
+    currentAccount={accountLabel(gate.current)}
+    storedAccount={accountLabel(gate.stored)}
+    onStartNew={handleStartNew}
+  />
 {:else}
   <div class="flex h-screen flex-col bg-bg text-text">
     <header class="flex items-center justify-between gap-6 px-6 py-4">

@@ -1,3 +1,5 @@
+import type { AccountMeta } from '../../shared/types';
+
 const timeFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 const dayFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 const monthFormat = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' });
@@ -45,4 +47,8 @@ export function formatMonth(at: number): string {
 
 export function formatCount(value: number): string {
   return value.toLocaleString('en-US');
+}
+
+export function accountLabel(account: AccountMeta): string {
+  return account.username !== null ? `@${account.username}` : `user ${account.userId}`;
 }

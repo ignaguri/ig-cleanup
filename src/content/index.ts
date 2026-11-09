@@ -1,4 +1,5 @@
 import type { IgRequest } from '../instagram/transport';
+import { parseViewer } from '../instagram/viewer';
 import { IG_APP_ID } from '../shared/constants';
 
 const FETCH_TIMEOUT_MS = 30000;
@@ -8,9 +9,13 @@ function readCsrfToken(): string {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
+function readScriptsText(): string {
+  return Array.from(document.scripts, (script) => script.textContent ?? '').join('\n');
+}
+
 // Instagram rejects POSTs without these (it answers with HTML). API POSTs derive jazoest from the csrftoken.
 function readPageTokens(csrfToken: string): { fb_dtsg: string; jazoest: string } | null {
-  const scriptsText = Array.from(document.scripts, (script) => script.textContent ?? '').join('\n');
+  const scriptsText = readScriptsText();
   const dtsg = scriptsText.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/)?.[1];
   if (!dtsg || !csrfToken) {
     return null;
@@ -64,6 +69,10 @@ const relayFlag = globalThis as { __igcRelay?: boolean };
 if (!relayFlag.__igcRelay) {
   relayFlag.__igcRelay = true;
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'igc:viewer') {
+      sendResponse(parseViewer(readScriptsText()));
+      return false;
+    }
     if (message?.type !== 'igc:fetch') {
       return false;
     }

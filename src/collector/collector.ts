@@ -5,7 +5,7 @@ import { actionsByStatus, allPeople, getMeta, mergePeople, recentRequests, setMe
 import { kick } from '../deck/lib/decide';
 import { fetchFollowersPage, fetchFollowingPage, fetchMutuals, sessionBlock } from '../instagram/client';
 import { blockFromError, IgBlockedError, IgNotFoundError, IgRetryableError, IgShapeError } from '../instagram/errors';
-import { readSession } from '../instagram/transport';
+import { readSession, readUsername } from '../instagram/transport';
 import {
   LIST_DELAY_MS,
   MAX_ATTEMPTS,
@@ -121,7 +121,15 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
       }
       let collection = (await getMeta<CollectionState>(META_COLLECTION)) ?? INITIAL_COLLECTION;
 
-      if ((await getMeta<AccountMeta>(META_ACCOUNT)) === undefined) {
+      const storedAccount = await getMeta<AccountMeta>(META_ACCOUNT);
+      if (storedAccount?.username === null) {
+        // Accounts collected before usernames were stored: collecting opens the relay tab anyway.
+        const username = await readUsername(storedAccount.userId, { openTab: true });
+        if (username !== null) {
+          await setMeta<AccountMeta>(META_ACCOUNT, { ...storedAccount, username });
+        }
+      }
+      if (storedAccount === undefined) {
         const session = await readSession();
         if (session === null) {
           await block({
@@ -133,7 +141,9 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
           });
           return;
         }
-        await setMeta<AccountMeta>(META_ACCOUNT, { userId: session.userId, username: null });
+        // Collecting needs the relay tab anyway.
+        const username = await readUsername(session.userId, { openTab: true });
+        await setMeta<AccountMeta>(META_ACCOUNT, { userId: session.userId, username });
       }
 
       let attempts = 0;

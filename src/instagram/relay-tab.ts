@@ -44,6 +44,12 @@ function waitForLoad(tabId: number): Promise<void> {
   });
 }
 
+// Only an already open, loaded tab: for reads that shouldn't open or reload instagram.com on their own.
+export async function findRelayTab(): Promise<number | null> {
+  const [tab] = await chrome.tabs.query({ url: `${IG_URL}*`, pinned: true });
+  return tab?.id !== undefined && tab.status === 'complete' && !tab.discarded ? tab.id : null;
+}
+
 export async function ensureRelayTab(): Promise<number> {
   const [existingTab] = await chrome.tabs.query({ url: `${IG_URL}*`, pinned: true });
   const tab = existingTab ?? (await chrome.tabs.create({ url: IG_URL, pinned: true, active: false }));

@@ -1,6 +1,7 @@
 import { IG_ORIGIN } from '../shared/constants';
 import { IgNoAnswerError, IgRetryableError, IgShapeError } from './errors';
-import { ensureRelayTab } from './relay-tab';
+import { ensureRelayTab, findRelayTab } from './relay-tab';
+import { isViewer } from './viewer';
 
 const RELAY_TIMEOUT_MS = 45000;
 
@@ -77,4 +78,19 @@ export async function igFetch(req: IgRequest): Promise<IgRawResponse> {
     throw new IgShapeError(req.path, reply.tokenError);
   }
   return reply;
+}
+
+// Read from the relay page itself, not requested from Instagram. Without openTab only an already open relay
+// tab is used. Null when unknown or another account; never throws.
+export async function readUsername(userId: string, { openTab }: { openTab: boolean }): Promise<string | null> {
+  try {
+    const tabId = openTab ? await ensureRelayTab() : await findRelayTab();
+    if (tabId === null) {
+      return null;
+    }
+    const reply = await sendToRelay(tabId, { type: 'igc:viewer' });
+    return isViewer(reply) && reply.userId === userId ? reply.username : null;
+  } catch {
+    return null;
+  }
 }
