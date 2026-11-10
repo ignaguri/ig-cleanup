@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the tag matches the manifest
+        run: |
+          MANIFEST_VERSION="v$(node -p "require('./static/manifest.json').version")"
+          if [ "$MANIFEST_VERSION" != "${{ github.ref_name }}" ]; then
+            echo "Tag ${{ github.ref_name }} doesn't match manifest $MANIFEST_VERSION"
+            exit 1
+          fi
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Create ZIP
+        run: |
+          cd dist
+          zip -r ../instagram-cleanup-${{ github.ref_name }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: instagram-cleanup-${{ github.ref_name }}.zip
+          generate_release_notes: true
+          body: |
+            ## New Installation
+
+            1. Download `instagram-cleanup-${{ github.ref_name }}.zip` below
+            2. Unzip the file
+            3. Open `chrome://extensions/` in Chrome
+            4. Enable **Developer mode** (top right)
+            5. Click **Load unpacked** and select the unzipped folder
+            6. Log into instagram.com, then click the extension icon to open the deck
+
+            ## Updating from a Previous Version
+
+            1. Download `instagram-cleanup-${{ github.ref_name }}.zip` below
+            2. Unzip it **to the same location** as the previous version, replacing all files
+            3. Go to `chrome://extensions/` and click the **reload** button (↻) on the extension card
+            4. Your scans and decisions are kept
