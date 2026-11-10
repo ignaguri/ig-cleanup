@@ -31,9 +31,10 @@ import ErrorBanner from './components/ErrorBanner.svelte';
 import Icon from './components/Icon.svelte';
 import SettingsView from './components/SettingsView.svelte';
 import StatusFooter from './components/StatusFooter.svelte';
+import VoiceToggle from './components/VoiceToggle.svelte';
 import { decide, kick, undoLast } from './lib/decide';
 import { accountLabel } from './lib/format';
-import { keyToCommand } from './lib/keyboard';
+import { type DeckCommand, keyToCommand } from './lib/keyboard';
 import { EXIT_MS } from './lib/motion';
 
 const UNDO_NOTE_MS = 4000;
@@ -326,9 +327,16 @@ function selectDeck(next: DeckId) {
   view = 'deck';
 }
 
+// Voice has no click behind it, so window.open would hit the popup blocker; the demo's fake chrome has no runtime.id.
 function openProfile() {
-  if (current) {
-    window.open(`${IG_ORIGIN}/${current.username}/`, '_blank', 'noopener');
+  if (!current) {
+    return;
+  }
+  const url = `${IG_ORIGIN}/${current.username}/`;
+  if (globalThis.chrome?.runtime?.id) {
+    chrome.tabs.create({ url });
+  } else {
+    window.open(url, '_blank', 'noopener');
   }
 }
 
@@ -355,6 +363,14 @@ function onKeydown(event: KeyboardEvent) {
     return;
   }
   event.preventDefault();
+  runCommand(command);
+}
+
+// Keys and voice both land here.
+function runCommand(command: DeckCommand) {
+  if (view !== 'deck' || gate.kind !== 'ok') {
+    return;
+  }
   if (command === 'undo') {
     handleUndo();
   } else if (command === 'open') {
@@ -430,8 +446,9 @@ onMount(() => {
           {/each}
         </nav>
       </div>
-      {#if view === 'deck'}
-        <div class="flex items-center gap-4 text-xs text-muted">
+      <div class="flex items-center gap-4 text-xs text-muted">
+        <VoiceToggle active={view === 'deck'} onCommand={runCommand} />
+        {#if view === 'deck'}
           <span class="flex items-center gap-1.5"><span class="kbd">←</span><span class="kbd">→</span> decide</span>
           <span class="flex items-center gap-1.5"><span class="kbd">Z</span> undo</span>
           {#if current}
@@ -439,8 +456,8 @@ onMount(() => {
               <span class="kbd">↵</span> open profile <Icon name="external" size={12} />
             </button>
           {/if}
-        </div>
-      {/if}
+        {/if}
+      </div>
     </header>
 
     {#if errorMessage || block}
