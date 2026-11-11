@@ -1,5 +1,5 @@
 import { MUTUALS_PATH } from '../instagram/endpoints';
-import type { CollectionState, DeckId, ListCursor, Person, RescanState } from '../shared/types';
+import type { CollectionState, DeckId, ListCursor, Person, ProfileCounts, RescanState } from '../shared/types';
 import { decisionImplies } from './decisions';
 import { followCheckedInScan, needsFollowCheck } from './follow-check';
 import { deckOf } from './people';
@@ -56,30 +56,58 @@ export function nextMutualsTarget(people: Person[], sentPks: Set<string>): Perso
 
 export type Progress = { done: number; total: number };
 
-// A rescan expects what the last scan found. Lists repeat people, so only accounts seen in this pass count,
-// and a list isn't full until Instagram says it's over.
+// Lists repeat people, so only accounts seen in this pass count, and a list isn't full until Instagram says it's over.
+function listProgress(cursor: ListCursor, total: number, seen: number): Progress {
+  return { done: cursor.done ? total : Math.min(seen, Math.max(total - 1, 0)), total };
+}
+
+// A rescan expects what the last scan found.
 function rescanListProgress(collection: CollectionState, people: Person[], scan: RescanState): Progress {
   const seenSince = (seenAt: number | undefined) => (seenAt ?? 0) >= scan.startedAt;
-  const listProgress = (
-    cursor: ListCursor,
-    expected: (person: Person) => boolean,
-    seen: (person: Person) => boolean,
-  ): Progress => {
-    const total = people.filter((person) => expected(person) || seen(person)).length;
-    const done = people.filter(seen).length;
-    return { done: cursor.done ? total : Math.min(done, Math.max(total - 1, 0)), total };
-  };
-  const followers = listProgress(
+  const progressOf = (cursor: ListCursor, expected: (person: Person) => boolean, seen: (person: Person) => boolean) =>
+    listProgress(
+      cursor,
+      people.filter((person) => expected(person) || seen(person)).length,
+      people.filter(seen).length,
+    );
+  const followers = progressOf(
     collection.followers,
     (person) => person.followsMe && !decisionImplies(person.decision, 'remove'),
     (person) => seenSince(person.seenInFollowersAt),
   );
-  const following = listProgress(
+  const following = progressOf(
     collection.following,
     (person) => person.iFollow && !decisionImplies(person.decision, 'unfollow'),
     (person) => seenSince(person.seenInFollowingAt),
   );
   return { done: followers.done + following.done, total: followers.total + following.total };
+}
+
+// The first scan expects what the profile says.
+function firstScanListProgress(collection: CollectionState, people: Person[], counts: ProfileCounts): Progress {
+  const progressOf = (cursor: ListCursor, expected: number, seen: number) =>
+    listProgress(cursor, Math.max(expected, seen), seen);
+  const followers = progressOf(
+    collection.followers,
+    counts.followers,
+    people.filter((person) => person.seenInFollowersAt !== undefined).length,
+  );
+  const following = progressOf(
+    collection.following,
+    counts.following,
+    people.filter((person) => person.seenInFollowingAt !== undefined).length,
+  );
+  return { done: followers.done + following.done, total: followers.total + following.total };
+}
+
+function scanListsProgress(collection: CollectionState, people: Person[]): Progress | null {
+  if (collection.rescan) {
+    return rescanListProgress(collection, people, collection.rescan);
+  }
+  if (collection.listsCompletedAt === null && collection.profileCounts) {
+    return firstScanListProgress(collection, people, collection.profileCounts);
+  }
+  return null;
 }
 
 export function collectionProgress(
@@ -107,7 +135,7 @@ export function collectionProgress(
   return {
     phase,
     listsSeen: collection.followers.seen + collection.following.seen,
-    lists: scan !== null ? rescanListProgress(collection, people, scan) : null,
+    lists: scanListsProgress(collection, people),
     followChecksLeft,
     followChecks: { done: followChecksDone, total: followChecksDone + followChecksLeft },
     mutualsDone: inDecks.filter((person) => !needsMutuals(person)).length,

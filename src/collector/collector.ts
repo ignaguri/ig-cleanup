@@ -10,6 +10,7 @@ import {
   fetchFollowingPage,
   fetchFollowStatuses,
   fetchMutuals,
+  fetchProfileCounts,
   sessionBlock,
 } from '../instagram/client';
 import { blockFromError, IgBlockedError, IgNotFoundError, IgRetryableError, IgShapeError } from '../instagram/errors';
@@ -33,9 +34,12 @@ import type {
   Mode,
   MutualPreview,
   Person,
+  ProfileCounts,
   RescanState,
   ScanSummary,
 } from '../shared/types';
+
+const PROFILE_COUNTS_TRIES = 3;
 
 export type CollectorHandle = { stop(): Promise<void> };
 
@@ -202,6 +206,7 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
 
       let attempts = 0;
       let delayRange = LIST_DELAY_MS;
+      let profileCountsTries = 0;
 
       while (!stopped) {
         const mode = await getMeta<Mode>(META_MODE);
@@ -213,6 +218,30 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
         if (accountBlock) {
           await block(accountBlock);
           return;
+        }
+
+        // Totals for the first scan's progress bar. Nice to have, so after a few misses they're left out.
+        if (
+          collection.profileCounts === undefined &&
+          collection.listsCompletedAt === null &&
+          !collection.refreshingPictures &&
+          profileCountsTries < PROFILE_COUNTS_TRIES
+        ) {
+          profileCountsTries += 1;
+          let profileCounts: ProfileCounts | null = null;
+          try {
+            profileCounts = await fetchProfileCounts();
+          } catch (error) {
+            log.warn('profile counts unavailable', error);
+          }
+          if (stopped) {
+            return;
+          }
+          if (profileCounts !== null || profileCountsTries >= PROFILE_COUNTS_TRIES) {
+            collection = { ...collection, profileCounts };
+            await setMeta(META_COLLECTION, collection);
+            onUpdate();
+          }
         }
 
         const listStep = nextListStep(collection);

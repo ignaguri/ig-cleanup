@@ -1,5 +1,5 @@
 import { LIST_PAGE_SIZE } from '../shared/constants';
-import type { IgRequest } from './transport';
+import type { IgRequest, ProfileQuery } from './transport';
 
 // fb_dtsg / jazoest are added by the relay at send time; nav_chain is telemetry we skip.
 const PAGE_SIZE = String(LIST_PAGE_SIZE);
@@ -33,6 +33,33 @@ export function mutualsRequest(targetPk: string): IgRequest {
 // Read-only, but Instagram takes the ids in a POST body.
 export function followStatusRequest(pks: string[]): IgRequest {
   return { method: 'POST', path: '/api/v1/friendships/show_many/', form: { user_ids: pks.join(',') } };
+}
+
+const PROFILE_QUERY_NAME = 'PolarisProfilePageContentQuery';
+
+// The query the profile page runs for its header. Instagram answers HTML without the friendly-name header.
+export function profileCountsRequest(userId: string, query: ProfileQuery): IgRequest {
+  return {
+    method: 'POST',
+    path: '/graphql/query',
+    form: {
+      __a: '1',
+      __d: 'www',
+      __comet_req: '7',
+      lsd: query.lsd,
+      fb_api_caller_class: 'RelayModern',
+      fb_api_req_friendly_name: PROFILE_QUERY_NAME,
+      server_timestamps: 'true',
+      doc_id: query.docId,
+      variables: JSON.stringify({
+        id: userId,
+        render_surface: 'PROFILE',
+        enable_integrity_filters: true,
+        ...query.providedVariables,
+      }),
+    },
+    headers: { 'X-FB-LSD': query.lsd, 'X-FB-Friendly-Name': PROFILE_QUERY_NAME },
+  };
 }
 
 export function unfollowRequest(targetPk: string): IgRequest {

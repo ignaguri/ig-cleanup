@@ -2,19 +2,27 @@ import { checkAccount } from '../core/account-guard';
 import { getMeta, logRequest, type RequestLogRow } from '../db/db';
 import { META_ACCOUNT } from '../shared/constants';
 import { log } from '../shared/log';
-import type { AccountMeta, BlockInfo, MutualPreview } from '../shared/types';
+import type { AccountMeta, BlockInfo, MutualPreview, ProfileCounts } from '../shared/types';
 import {
   followersRequest,
   followingRequest,
   followRequest,
   followStatusRequest,
   mutualsRequest,
+  profileCountsRequest,
   removeFollowerRequest,
   unfollowRequest,
 } from './endpoints';
 import { IgBlockedError, IgRetryableError, IgShapeError } from './errors';
-import { type IgUser, parseFollowStatuses, parseMutualsPage, parseUserPage, parseWriteResult } from './parse';
-import { type IgRawResponse, type IgRequest, igFetch, readSession } from './transport';
+import {
+  type IgUser,
+  parseFollowStatuses,
+  parseMutualsPage,
+  parseProfileCounts,
+  parseUserPage,
+  parseWriteResult,
+} from './parse';
+import { type IgRawResponse, type IgRequest, igFetch, readProfileQuery, readSession } from './transport';
 
 type UserPage = { users: IgUser[]; nextMaxId: string | null };
 
@@ -122,6 +130,16 @@ export async function fetchMutuals(pk: string): Promise<MutualPreview> {
 export async function fetchFollowStatuses(pks: string[]): Promise<Map<string, boolean>> {
   await requireSession('/api/v1/friendships/show_many/');
   return send(followStatusRequest(pks), parseFollowStatuses);
+}
+
+export async function fetchProfileCounts(): Promise<ProfileCounts> {
+  const endpoint = '/graphql/query';
+  const session = await requireSession(endpoint);
+  const query = await readProfileQuery();
+  if (query === null) {
+    throw new IgShapeError(endpoint, 'profile query not found on the page');
+  }
+  return send(profileCountsRequest(session.userId, query), parseProfileCounts);
 }
 
 export async function unfollow(pk: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { LIST_PAGE_SIZE } from '../shared/constants';
-import type { BlockInfo, MutualPreview } from '../shared/types';
+import type { BlockInfo, MutualPreview, ProfileCounts } from '../shared/types';
 import { EXCERPT_LENGTH, IgBlockedError, IgNotFoundError, IgRetryableError, IgShapeError } from './errors';
 import type { IgRawResponse } from './transport';
 
@@ -127,6 +127,16 @@ export function parseFollowStatuses(res: IgRawResponse, endpoint: string): Map<s
       return [pk, status.following];
     }),
   );
+}
+
+export function parseProfileCounts(res: IgRawResponse, endpoint: string): ProfileCounts {
+  const user = (parseBody(res, endpoint).data as { user?: Record<string, unknown> } | undefined)?.user;
+  const followers = user?.follower_count;
+  const following = user?.following_count;
+  if (typeof followers !== 'number' || typeof following !== 'number') {
+    throw new IgShapeError(endpoint, 'user without follower or following count', res);
+  }
+  return { followers, following };
 }
 
 export function parseWriteResult(res: IgRawResponse, endpoint: string): void {

@@ -6,6 +6,7 @@ import {
   followRequest,
   followStatusRequest,
   mutualsRequest,
+  profileCountsRequest,
   removeFollowerRequest,
   unfollowRequest,
 } from './endpoints';
@@ -64,6 +65,19 @@ describe('follow status request', () => {
       path: '/api/v1/friendships/show_many/',
       form: { user_ids: '1,2' },
     });
+  });
+});
+
+describe('profile counts request', () => {
+  it("asks for my profile with the page's doc_id and flags", () => {
+    const request = profileCountsRequest('42', { docId: '99', providedVariables: { flag: true }, lsd: 'L' });
+    expect(request).toMatchObject({
+      method: 'POST',
+      path: '/graphql/query',
+      form: { doc_id: '99', lsd: 'L' },
+      headers: { 'X-FB-LSD': 'L', 'X-FB-Friendly-Name': 'PolarisProfilePageContentQuery' },
+    });
+    expect(JSON.parse(request.form?.variables ?? '')).toMatchObject({ id: '42', flag: true });
   });
 });
 

@@ -39,6 +39,7 @@ async function performFetch(req: IgRequest) {
       'X-IG-App-ID': IG_APP_ID,
       'X-CSRFToken': csrfToken,
       'X-Requested-With': 'XMLHttpRequest',
+      ...req.headers,
     };
     let body: URLSearchParams | undefined;
     if (req.method === 'POST') {

@@ -112,6 +112,17 @@ describe('collectionProgress', () => {
     expect(collectionProgress({ ...reading, followers: doneCursor }, allSeen).lists).toEqual({ done: 5, total: 5 });
   });
 
+  it('counts a first scan against the profile, growing the total when the list runs over', () => {
+    const profileCounts = { followers: 2, following: 3 };
+    const follower = person({ pk: 'follower', iFollow: false, followsMe: true, seenInFollowersAt: 5 });
+    const reading = { ...INITIAL_COLLECTION, profileCounts };
+    expect(collectionProgress(INITIAL_COLLECTION, [follower]).lists).toBeNull();
+    expect(collectionProgress(reading, [follower]).lists).toEqual({ done: 1, total: 5 });
+    const extras = ['a', 'b', 'c'].map((pk) => person({ pk, iFollow: false, followsMe: true, seenInFollowersAt: 5 }));
+    expect(collectionProgress(reading, [follower, ...extras]).lists).toEqual({ done: 3, total: 7 });
+    expect(collectionProgress({ ...reading, listsCompletedAt: 9 }, [follower]).lists).toBeNull();
+  });
+
   it('stays in the lists phase while fans are unconfirmed', () => {
     const fan = person({ pk: 'fan', iFollow: false, followsMe: true });
     const progress = collectionProgress({ ...listsDone, mutualsCompletedAt: 5 }, [fan]);

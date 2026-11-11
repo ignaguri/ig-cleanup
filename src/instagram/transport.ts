@@ -10,7 +10,50 @@ export type IgRequest = {
   path: string;
   query?: Record<string, string>;
   form?: Record<string, string>;
+  headers?: Record<string, string>;
 };
+
+export type ProfileQuery = { docId: string; providedVariables: Record<string, unknown>; lsd: string };
+
+type PageModule = {
+  params?: { id?: unknown; providedVariables?: Record<string, { get: () => unknown }> };
+  token?: unknown;
+};
+
+// Runs inside the page, so it can't use anything from this file.
+function readProfileQueryInPage(): ProfileQuery | null {
+  try {
+    const pageRequire = (window as unknown as { require: (name: string) => PageModule }).require;
+    const params = pageRequire('PolarisProfilePageContentQuery$Parameters').params;
+    const lsd = pageRequire('LSD').token;
+    if (typeof params?.id !== 'string' || typeof lsd !== 'string') {
+      return null;
+    }
+    const providedVariables: Record<string, unknown> = {};
+    for (const [name, provider] of Object.entries(params.providedVariables ?? {})) {
+      providedVariables[name] = provider.get();
+    }
+    return { docId: params.id, providedVariables, lsd };
+  } catch {
+    return null;
+  }
+}
+
+// The query's doc_id changes with Instagram's deploys, so it's read from the page's own modules.
+// Null when the page doesn't have them; never throws.
+export async function readProfileQuery(): Promise<ProfileQuery | null> {
+  try {
+    const tabId = await ensureRelayTab();
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: readProfileQueryInPage,
+    });
+    return (injection?.result as ProfileQuery | null | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export type IgRawResponse = { status: number; url: string; text: string };
 

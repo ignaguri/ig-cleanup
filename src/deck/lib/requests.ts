@@ -5,6 +5,7 @@ const ENDPOINTS: { pattern: RegExp; label: string }[] = [
   { pattern: /^\/api\/v1\/friendships\/(\d+)\/following\/$/, label: 'Following page' },
   { pattern: MUTUALS_PATH, label: 'People in common' },
   { pattern: /^\/api\/v1\/friendships\/show_many\/$/, label: 'Follow check' },
+  { pattern: /^\/graphql\/query$/, label: 'Profile counts' },
   { pattern: /^\/api\/v1\/friendships\/destroy\/(\d+)\/$/, label: 'Unfollow' },
   { pattern: /^\/api\/v1\/friendships\/create\/(\d+)\/$/, label: 'Follow' },
   { pattern: /^\/api\/v1\/friendships\/remove_follower\/(\d+)\/$/, label: 'Remove follower' },

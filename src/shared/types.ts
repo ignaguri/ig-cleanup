@@ -78,7 +78,11 @@ export type CollectionState = {
   refreshingPictures: boolean;
   modeBeforeRefresh: Mode | null;
   rescan?: RescanState | null;
+  // Read from the profile when the first scan starts; null when Instagram wouldn't say.
+  profileCounts?: ProfileCounts | null;
 };
+
+export type ProfileCounts = { followers: number; following: number };
 
 export type RescanState = {
   startedAt: number;

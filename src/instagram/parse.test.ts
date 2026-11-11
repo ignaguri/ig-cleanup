@@ -4,7 +4,14 @@ import following from './__fixtures__/following-page.json';
 import mutuals from './__fixtures__/mutuals-page.json';
 import writes from './__fixtures__/writes.json';
 import { IgBlockedError, IgRetryableError, IgShapeError } from './errors';
-import { detectBlock, parseFollowStatuses, parseMutualsPage, parseUserPage, parseWriteResult } from './parse';
+import {
+  detectBlock,
+  parseFollowStatuses,
+  parseMutualsPage,
+  parseProfileCounts,
+  parseUserPage,
+  parseWriteResult,
+} from './parse';
 import type { IgRawResponse } from './transport';
 
 const URL_OK = 'https://www.instagram.com/api/v1/friendships/1/followers/';
@@ -156,6 +163,17 @@ describe('parseFollowStatuses', () => {
     expect(() => parseFollowStatuses(ok({ friendship_statuses: { '1': {} }, status: 'ok' }), 's')).toThrow(
       IgShapeError,
     );
+  });
+});
+
+describe('parseProfileCounts', () => {
+  it('reads both counts from the profile user', () => {
+    const body = { data: { user: { username: 'me', follower_count: 2226, following_count: 2238 } } };
+    expect(parseProfileCounts(ok(body), 'g')).toEqual({ followers: 2226, following: 2238 });
+  });
+
+  it('throws IgShapeError when a count is missing', () => {
+    expect(() => parseProfileCounts(ok({ data: { user: { follower_count: 1 } } }), 'g')).toThrow(IgShapeError);
   });
 });
 
