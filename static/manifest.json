@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Instagram Cleanup",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyxd8VYPUxFdgpMZrRKf6MI31HCUd6HVP0POAjJ0ofWr55A/rJ21NQ3gt/dBhP4AIbgs6g/3oAQTUXO6L7J6pQOq26uNxjfy2ayzXelQSf38ohYbEHvaNiHGYHzPVXz3WuN7BQnB529rILIahSHrGNRyxivRaB7NIAmA9j3sjhRw2vjlfb0UdZj/SIKko1zYnzwc518cl6X7IJP7Ce1GvkfWNWGnJO4LwK5kPVtxVwWDWtWWGLZENUjcL7v85AMPenqVtZ+qkkZ7pm4hsXbf4DR0uLp4cpayvzfWKpDfGwL/S9lQTC2SzS7guDl+V4LKAj00yFIuEIvhaeJAHTiTa7QIDAQAB",
   "description": "Swipe through the accounts you follow and decide who stays.",
   "permissions": [
