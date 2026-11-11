@@ -87,11 +87,29 @@ describe('collectionProgress', () => {
     expect(collectionProgress(listsDone, people)).toEqual({
       phase: 'mutuals',
       listsSeen: 20,
+      lists: null,
       followChecksLeft: 0,
+      followChecks: { done: 0, total: 0 },
       mutualsDone: 1,
       mutualsTotal: 2,
     });
     expect(collectionProgress({ ...listsDone, mutualsCompletedAt: 5 }, people).phase).toBe('done');
+  });
+
+  it('counts a rescan by accounts seen in this pass, and holds short of full until the list ends', () => {
+    const rescan = { startedAt: 100, previousAt: 10 };
+    const people = [
+      person({ pk: 'seen', followsMe: true, iFollow: false, seenInFollowersAt: 150 }),
+      person({ pk: 'pending', followsMe: true, iFollow: false, seenInFollowersAt: 50 }),
+      person({ pk: 'also-pending', followsMe: true, iFollow: false, seenInFollowersAt: 60 }),
+      person({ pk: 'removed', followsMe: true, iFollow: false, decision: 'remove' }),
+      person({ pk: 'new', followsMe: true, iFollow: false, seenInFollowersAt: 160 }),
+    ];
+    const reading = { ...INITIAL_COLLECTION, rescan };
+    expect(collectionProgress(reading, people).lists).toEqual({ done: 2, total: 4 });
+    const allSeen = people.map((current) => ({ ...current, seenInFollowersAt: 150 }));
+    expect(collectionProgress(reading, allSeen).lists).toEqual({ done: 4, total: 5 });
+    expect(collectionProgress({ ...reading, followers: doneCursor }, allSeen).lists).toEqual({ done: 5, total: 5 });
   });
 
   it('stays in the lists phase while fans are unconfirmed', () => {
@@ -99,6 +117,8 @@ describe('collectionProgress', () => {
     const progress = collectionProgress({ ...listsDone, mutualsCompletedAt: 5 }, [fan]);
     expect(progress.phase).toBe('lists');
     expect(progress.followChecksLeft).toBe(1);
+    const checked = person({ pk: 'checked', iFollow: false, followsMe: true, followCheckedAt: 3 });
+    expect(collectionProgress(listsDone, [fan, checked]).followChecks).toEqual({ done: 1, total: 2 });
   });
 });
 

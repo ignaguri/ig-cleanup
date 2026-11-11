@@ -21,11 +21,12 @@ let { collection, people, mode, scans, onScanAgain, onStart, onPause }: Props = 
 const lastScan = $derived(scans.at(-1) ?? null);
 
 // Both lists page by page at the list pace, plus roughly a second per request.
+const perPageMs = (LIST_DELAY_MS[0] + LIST_DELAY_MS[1]) / 2 + 1000;
+
 const scanEstimateMs = $derived.by(() => {
   const pages = (count: number) => Math.ceil(count / LIST_PAGE_SIZE);
   const followers = people.filter((person) => person.followsMe).length;
   const following = people.filter((person) => person.iFollow).length;
-  const perPageMs = (LIST_DELAY_MS[0] + LIST_DELAY_MS[1]) / 2 + 1000;
   return (pages(followers) + pages(following)) * perPageMs;
 });
 
@@ -49,29 +50,47 @@ const STEPS: { id: 'lists' | 'mutuals' | 'done'; label: string }[] = [
 
 const stepIndex = $derived(STEPS.findIndex((step) => step.id === progress.phase));
 
-const mutualsPercent = $derived(progress.mutualsTotal === 0 ? 0 : (progress.mutualsDone / progress.mutualsTotal) * 100);
+function percentOf(done: number, total: number): number {
+  return total === 0 ? 0 : (done / total) * 100;
+}
 
 const detail = $derived.by(() => {
+  const { lists, followChecks } = progress;
   if (progress.followChecksLeft > 0) {
     return {
-      headline: `${formatCount(progress.followChecksLeft)} accounts to confirm`,
+      headline: `${formatCount(followChecks.done)} of ${formatCount(followChecks.total)} confirmed`,
       sub: "Instagram's following list skips people, so checking who you really don't follow",
+      percent: percentOf(followChecks.done, followChecks.total),
+    };
+  }
+  if (progress.phase === 'lists' && lists !== null) {
+    const pagesLeft = Math.ceil((lists.total - lists.done) / LIST_PAGE_SIZE);
+    return {
+      headline: `${formatCount(lists.done)} of ${formatCount(lists.total)} accounts read`,
+      sub: `About ${formatDuration(pagesLeft * perPageMs)} left, reading both lists page by page`,
+      percent: percentOf(lists.done, lists.total),
     };
   }
   if (progress.phase === 'lists') {
-    return { headline: `${formatCount(progress.listsSeen)} accounts seen`, sub: 'Reading both lists page by page' };
+    return {
+      headline: `${formatCount(progress.listsSeen)} accounts seen`,
+      sub: 'Reading both lists page by page',
+      percent: null,
+    };
   }
   if (progress.phase === 'mutuals') {
     const left = progress.mutualsTotal - progress.mutualsDone;
     return {
       headline: `${formatCount(progress.mutualsDone)} of ${formatCount(progress.mutualsTotal)} checked`,
       sub: `About ${formatDuration(left * averageMutualsDelayMs)} left at the current pace`,
+      percent: percentOf(progress.mutualsDone, progress.mutualsTotal),
     };
   }
   const finishedAt = collection.mutualsCompletedAt;
   return {
     headline: `${formatCount(people.length)} accounts collected`,
     sub: finishedAt !== null ? `Finished ${formatWhen(finishedAt, Date.now())}` : 'Collection complete',
+    percent: null,
   };
 });
 </script>
@@ -108,10 +127,12 @@ const detail = $derived.by(() => {
       <p class="text-xl font-semibold tracking-tight tabular-nums">{detail.headline}</p>
       <p class="mt-1 text-sm text-muted">{detail.sub}</p>
     </div>
-    {#if progress.phase === 'mutuals'}
+    {#if detail.percent !== null}
       <div class="h-1.5 overflow-hidden rounded-full bg-line">
-        <div class="h-full rounded-full bg-text transition-[width] duration-500" style={`width: ${mutualsPercent}%`}></div>
+        <div class="h-full rounded-full bg-text transition-[width] duration-500" style={`width: ${detail.percent}%`}></div>
       </div>
+    {/if}
+    {#if progress.phase === 'mutuals'}
       <p class="text-xs text-muted">Only for the two decks you'd cut from, and slowly, to stay under Instagram's limits.</p>
     {/if}
     {#if collection.refreshingPictures}

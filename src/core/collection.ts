@@ -1,6 +1,7 @@
 import { MUTUALS_PATH } from '../instagram/endpoints';
-import type { CollectionState, DeckId, Person } from '../shared/types';
-import { needsFollowCheck } from './follow-check';
+import type { CollectionState, DeckId, ListCursor, Person, RescanState } from '../shared/types';
+import { decisionImplies } from './decisions';
+import { followCheckedInScan, needsFollowCheck } from './follow-check';
 import { deckOf } from './people';
 
 export const INITIAL_COLLECTION: CollectionState = {
@@ -53,14 +54,44 @@ export function nextMutualsTarget(people: Person[], sentPks: Set<string>): Perso
   return best;
 }
 
+export type Progress = { done: number; total: number };
+
+// A rescan expects what the last scan found. Lists repeat people, so only accounts seen in this pass count,
+// and a list isn't full until Instagram says it's over.
+function rescanListProgress(collection: CollectionState, people: Person[], scan: RescanState): Progress {
+  const seenSince = (seenAt: number | undefined) => (seenAt ?? 0) >= scan.startedAt;
+  const listProgress = (
+    cursor: ListCursor,
+    expected: (person: Person) => boolean,
+    seen: (person: Person) => boolean,
+  ): Progress => {
+    const total = people.filter((person) => expected(person) || seen(person)).length;
+    const done = people.filter(seen).length;
+    return { done: cursor.done ? total : Math.min(done, Math.max(total - 1, 0)), total };
+  };
+  const followers = listProgress(
+    collection.followers,
+    (person) => person.followsMe && !decisionImplies(person.decision, 'remove'),
+    (person) => seenSince(person.seenInFollowersAt),
+  );
+  const following = listProgress(
+    collection.following,
+    (person) => person.iFollow && !decisionImplies(person.decision, 'unfollow'),
+    (person) => seenSince(person.seenInFollowingAt),
+  );
+  return { done: followers.done + following.done, total: followers.total + following.total };
+}
+
 export function collectionProgress(
   collection: CollectionState,
   people: Person[],
 ): {
   phase: 'lists' | 'mutuals' | 'done';
   listsSeen: number;
+  lists: Progress | null;
   // People the following list left out, still to be confirmed with Instagram.
   followChecksLeft: number;
+  followChecks: Progress;
   mutualsDone: number;
   mutualsTotal: number;
 } {
@@ -72,10 +103,13 @@ export function collectionProgress(
   if (listsRead && followChecksLeft === 0 && scan === null) {
     phase = collection.mutualsCompletedAt !== null ? 'done' : 'mutuals';
   }
+  const followChecksDone = people.filter((person) => followCheckedInScan(person, scan)).length;
   return {
     phase,
     listsSeen: collection.followers.seen + collection.following.seen,
+    lists: scan !== null ? rescanListProgress(collection, people, scan) : null,
     followChecksLeft,
+    followChecks: { done: followChecksDone, total: followChecksDone + followChecksLeft },
     mutualsDone: inDecks.filter((person) => !needsMutuals(person)).length,
     mutualsTotal: inDecks.length,
   };
