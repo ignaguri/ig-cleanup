@@ -1,16 +1,17 @@
 import { INITIAL_COLLECTION, nextListStep, nextMutualsTarget, skipsMutuals429 } from '../core/collection';
+import { applyFollowCheck, nextFollowCheckBatch } from '../core/follow-check';
 import { randomDelay } from '../core/pacing';
 import { mergeListPage } from '../core/people';
-import {
-  dropMissingFollowers,
-  dropMissingFollowing,
-  followersDiffLooksWrong,
-  followingDiffLooksWrong,
-  summarizeScan,
-} from '../core/rescan';
+import { dropMissingFollowers, followersDiffLooksWrong, summarizeScan } from '../core/rescan';
 import { actionsByStatus, allActions, allPeople, getMeta, mergePeople, recentRequests, setMeta } from '../db/db';
 import { kick } from '../deck/lib/decide';
-import { fetchFollowersPage, fetchFollowingPage, fetchMutuals, sessionBlock } from '../instagram/client';
+import {
+  fetchFollowersPage,
+  fetchFollowingPage,
+  fetchFollowStatuses,
+  fetchMutuals,
+  sessionBlock,
+} from '../instagram/client';
 import { blockFromError, IgBlockedError, IgNotFoundError, IgRetryableError, IgShapeError } from '../instagram/errors';
 import { readSession, readUsername } from '../instagram/transport';
 import {
@@ -153,13 +154,7 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
   }
 
   async function finishRescan(scan: RescanState): Promise<void> {
-    const followingDiffSkipped = followingDiffLooksWrong(await allPeople(), scan, await actedOnPks('unfollow'));
-    if (followingDiffSkipped) {
-      log.warn('following list came back much shorter than stored, not dropping anyone from it');
-    } else {
-      await applyDiff((people) => dropMissingFollowing(people, scan));
-    }
-    const summary = summarizeScan(await allPeople(), { ...scan, followingDiffSkipped }, Date.now());
+    const summary = summarizeScan(await allPeople(), scan, Date.now());
     const scans = (await getMeta<ScanSummary[]>(META_SCANS)) ?? [];
     await setMeta<ScanSummary[]>(META_SCANS, [...scans, summary]);
   }
@@ -227,7 +222,9 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
           return;
         }
 
-        stepLabel = listStep ?? 'mutuals';
+        const scan = collection.rescan ?? null;
+        const followCheckBatch = listStep === null ? nextFollowCheckBatch(await allPeople(), scan) : [];
+        stepLabel = listStep ?? (followCheckBatch.length > 0 ? 'followCheck' : 'mutuals');
         try {
           if (listStep !== null) {
             delayRange = LIST_DELAY_MS;
@@ -261,22 +258,37 @@ export function startCollector(onUpdate: () => void): CollectorHandle {
               seen: cursor.seen + page.users.length,
             };
             collection = { ...collection, [listStep]: updatedCursor };
-            const scan = collection.rescan ?? null;
             if (scan !== null && updatedCursor.done && listStep === 'followers') {
               const skipped = await finishFollowersPass(scan);
               collection = { ...collection, rescan: { ...scan, followersDiffSkipped: skipped } };
             }
-            if (listStep === 'following' && updatedCursor.done && !collection.refreshingPictures) {
-              collection = { ...collection, listsCompletedAt: Date.now() };
-              if (scan !== null) {
-                await finishRescan(scan);
-                // New people get their people in common next.
-                collection = { ...collection, rescan: null, mutualsCompletedAt: null };
-              }
-            }
             if (collection.refreshingPictures && nextListStep(collection) === null) {
               await finishRefresh(collection);
               return;
+            }
+          } else if (followCheckBatch.length > 0) {
+            delayRange = LIST_DELAY_MS;
+            const pks = followCheckBatch.map((person) => person.pk);
+            const followStatuses = await fetchFollowStatuses(pks);
+            if (stopped) {
+              return;
+            }
+            // These accounts were just in a list, so a short answer is Instagram's, not deleted accounts.
+            if (followStatuses.size < pks.length / 2) {
+              throw new IgShapeError(
+                '/api/v1/friendships/show_many/',
+                `answered ${followStatuses.size} of ${pks.length}`,
+              );
+            }
+            const checkedAt = Date.now();
+            await mergePeople(pks, (current) => applyFollowCheck([...current.values()], followStatuses, checkedAt));
+          } else if (collection.listsCompletedAt === null || scan !== null) {
+            // Both lists are read and everyone they left out is confirmed.
+            collection = { ...collection, listsCompletedAt: Date.now() };
+            if (scan !== null) {
+              await finishRescan(scan);
+              // New people get their people in common next.
+              collection = { ...collection, rescan: null, mutualsCompletedAt: null };
             }
           } else {
             const sentPks = new Set((await actionsByStatus('sent')).map((action) => action.personPk));

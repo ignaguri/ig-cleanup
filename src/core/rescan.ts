@@ -11,38 +11,11 @@ function missingFollowers(people: Person[], scan: RescanState): Person[] {
   return people.filter((person) => person.followsMe && missedBy(person.seenInFollowersAt, scan));
 }
 
-function missingFollowing(people: Person[], scan: RescanState): Person[] {
-  return people.filter((person) => person.iFollow && missedBy(person.seenInFollowingAt, scan));
-}
-
-// People I removed or unfollowed myself are expected to be missing, so they don't make a list look short.
-function looksShort(
-  people: Person[],
-  inList: (person: Person) => boolean,
-  missing: (people: Person[]) => Person[],
-  expectedGone: Set<string>,
-): boolean {
-  const counted = people.filter((person) => !expectedGone.has(person.pk));
-  const listed = counted.filter(inList).length;
-  return missing(counted).length > Math.max(10, listed * MAX_LOST_SHARE);
-}
-
+// People I removed myself are expected to be missing, so they don't make the list look short.
 export function followersDiffLooksWrong(people: Person[], scan: RescanState, removedPks: Set<string>): boolean {
-  return looksShort(
-    people,
-    (person) => person.followsMe,
-    (counted) => missingFollowers(counted, scan),
-    removedPks,
-  );
-}
-
-export function followingDiffLooksWrong(people: Person[], scan: RescanState, unfollowedPks: Set<string>): boolean {
-  return looksShort(
-    people,
-    (person) => person.iFollow,
-    (counted) => missingFollowing(counted, scan),
-    unfollowedPks,
-  );
+  const counted = people.filter((person) => !removedPks.has(person.pk));
+  const listed = counted.filter((person) => person.followsMe).length;
+  return missingFollowers(counted, scan).length > Math.max(10, listed * MAX_LOST_SHARE);
 }
 
 // After a full followers pass. People I removed myself aren't counted as having left.
@@ -69,20 +42,6 @@ export function dropMissingFollowers(
   });
 }
 
-// After a full following pass: whoever isn't in it was unfollowed (here or on Instagram).
-export function dropMissingFollowing(people: Person[], scan: RescanState): Person[] {
-  return missingFollowing(people, scan).map((person) => ({ ...person, iFollow: false }));
-}
-
-// While the following list is being re-read, people first seen in this rescan may look like fans.
-export function isUnsettledInRescan(
-  person: Person,
-  scan: RescanState | null | undefined,
-  followingDone: boolean,
-): boolean {
-  return scan != null && !followingDone && (person.startedFollowingMe?.before ?? 0) >= scan.startedAt;
-}
-
 export function summarizeScan(people: Person[], scan: RescanState, completedAt: number): ScanSummary {
   const sinceThisScan = (timeWindow: TimeWindow | null | undefined) =>
     timeWindow != null && timeWindow.before >= scan.startedAt;
@@ -94,6 +53,5 @@ export function summarizeScan(people: Person[], scan: RescanState, completedAt: 
     lostFollowers: people.filter((person) => sinceThisScan(person.unfollowedMe)).length,
     newFollowers: people.filter((person) => sinceThisScan(person.startedFollowingMe)).length,
     followersDiffSkipped: scan.followersDiffSkipped ?? false,
-    followingDiffSkipped: scan.followingDiffSkipped ?? false,
   };
 }

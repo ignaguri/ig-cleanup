@@ -1,5 +1,6 @@
 import { MUTUALS_PATH } from '../instagram/endpoints';
 import type { CollectionState, DeckId, Person } from '../shared/types';
+import { needsFollowCheck } from './follow-check';
 import { deckOf } from './people';
 
 export const INITIAL_COLLECTION: CollectionState = {
@@ -55,15 +56,26 @@ export function nextMutualsTarget(people: Person[], sentPks: Set<string>): Perso
 export function collectionProgress(
   collection: CollectionState,
   people: Person[],
-): { phase: 'lists' | 'mutuals' | 'done'; listsSeen: number; mutualsDone: number; mutualsTotal: number } {
+): {
+  phase: 'lists' | 'mutuals' | 'done';
+  listsSeen: number;
+  // People the following list left out, still to be confirmed with Instagram.
+  followChecksLeft: number;
+  mutualsDone: number;
+  mutualsTotal: number;
+} {
   const inDecks = people.filter(fetchesMutuals);
   let phase: 'lists' | 'mutuals' | 'done' = 'lists';
-  if (collection.followers.done && collection.following.done) {
+  const listsRead = collection.followers.done && collection.following.done;
+  const scan = collection.rescan ?? null;
+  const followChecksLeft = listsRead ? people.filter((person) => needsFollowCheck(person, scan)).length : 0;
+  if (listsRead && followChecksLeft === 0 && scan === null) {
     phase = collection.mutualsCompletedAt !== null ? 'done' : 'mutuals';
   }
   return {
     phase,
     listsSeen: collection.followers.seen + collection.following.seen,
+    followChecksLeft,
     mutualsDone: inDecks.filter((person) => !needsMutuals(person)).length,
     mutualsTotal: inDecks.length,
   };

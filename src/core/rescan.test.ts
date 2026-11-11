@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Person } from '../shared/types';
-import {
-  dropMissingFollowers,
-  dropMissingFollowing,
-  followersDiffLooksWrong,
-  followingDiffLooksWrong,
-  summarizeScan,
-} from './rescan';
+import { dropMissingFollowers, followersDiffLooksWrong, summarizeScan } from './rescan';
 
 const scan = { startedAt: 100, previousAt: 10 };
 const none = new Set<string>();
@@ -69,21 +63,6 @@ describe('followersDiffLooksWrong', () => {
   it("doesn't count people I removed as missing", () => {
     const removed = new Set(followers.slice(170, 190).map((p) => p.pk));
     expect(followersDiffLooksWrong(followers, scan, removed)).toBe(false);
-  });
-});
-
-describe('dropMissingFollowing', () => {
-  it('drops only accounts missing from this scan, and holds back when the list looks short', () => {
-    const people = [
-      person({ pk: 'gone', iFollow: true, seenInFollowingAt: 50 }),
-      person({ pk: 'still', iFollow: true, seenInFollowingAt: 150 }),
-    ];
-    expect(dropMissingFollowing(people, scan).map((p) => [p.pk, p.iFollow])).toEqual([['gone', false]]);
-    const following = Array.from({ length: 30 }, (_, index) =>
-      person({ pk: String(index), iFollow: true, seenInFollowingAt: index < 15 ? 150 : 50 }),
-    );
-    expect(followingDiffLooksWrong(following, scan, none)).toBe(true);
-    expect(followingDiffLooksWrong(following, scan, new Set(following.slice(15, 25).map((p) => p.pk)))).toBe(false);
   });
 });
 

@@ -52,6 +52,12 @@ const stepIndex = $derived(STEPS.findIndex((step) => step.id === progress.phase)
 const mutualsPercent = $derived(progress.mutualsTotal === 0 ? 0 : (progress.mutualsDone / progress.mutualsTotal) * 100);
 
 const detail = $derived.by(() => {
+  if (progress.followChecksLeft > 0) {
+    return {
+      headline: `${formatCount(progress.followChecksLeft)} accounts to confirm`,
+      sub: "Instagram's following list skips people, so checking who you really don't follow",
+    };
+  }
   if (progress.phase === 'lists') {
     return { headline: `${formatCount(progress.listsSeen)} accounts seen`, sub: 'Reading both lists page by page' };
   }

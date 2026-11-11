@@ -4,7 +4,7 @@ import following from './__fixtures__/following-page.json';
 import mutuals from './__fixtures__/mutuals-page.json';
 import writes from './__fixtures__/writes.json';
 import { IgBlockedError, IgRetryableError, IgShapeError } from './errors';
-import { detectBlock, parseMutualsPage, parseUserPage, parseWriteResult } from './parse';
+import { detectBlock, parseFollowStatuses, parseMutualsPage, parseUserPage, parseWriteResult } from './parse';
 import type { IgRawResponse } from './transport';
 
 const URL_OK = 'https://www.instagram.com/api/v1/friendships/1/followers/';
@@ -139,6 +139,23 @@ describe('detectBlock', () => {
 
   it('returns null for a healthy response', () => {
     expect(detectBlock(ok(followers), 'e', now)).toBeNull();
+  });
+});
+
+describe('parseFollowStatuses', () => {
+  it('maps each account to whether I follow it', () => {
+    const body = { friendship_statuses: { '1': { following: true }, '2': { following: false } }, status: 'ok' };
+    expect([...parseFollowStatuses(ok(body), 's')]).toEqual([
+      ['1', true],
+      ['2', false],
+    ]);
+  });
+
+  it('throws IgShapeError when the statuses are missing', () => {
+    expect(() => parseFollowStatuses(ok({ status: 'ok' }), 's')).toThrow(IgShapeError);
+    expect(() => parseFollowStatuses(ok({ friendship_statuses: { '1': {} }, status: 'ok' }), 's')).toThrow(
+      IgShapeError,
+    );
   });
 });
 

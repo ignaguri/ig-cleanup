@@ -53,10 +53,9 @@ const gained = $derived(
       Last scan {formatWhen(lastScan.completedAt, Date.now())}: {formatCount(lastScan.lostFollowers)} stopped following you,
       {formatCount(lastScan.newFollowers)} new.
     </p>
-    {#if lastScan.followersDiffSkipped || lastScan.followingDiffSkipped}
+    {#if lastScan.followersDiffSkipped}
       <p class="mt-2 text-sm text-warn">
-        Instagram's {lastScan.followersDiffSkipped ? 'followers' : 'following'} list came back much shorter than before, so
-        nobody was marked as gone from it. Try scanning again later.
+        Instagram's followers list came back much shorter than before, so nobody was marked as gone from it. Try scanning again later.
       </p>
     {/if}
   </div>

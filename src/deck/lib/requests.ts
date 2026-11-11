@@ -4,6 +4,7 @@ const ENDPOINTS: { pattern: RegExp; label: string }[] = [
   { pattern: /^\/api\/v1\/friendships\/(\d+)\/followers\/$/, label: 'Followers page' },
   { pattern: /^\/api\/v1\/friendships\/(\d+)\/following\/$/, label: 'Following page' },
   { pattern: MUTUALS_PATH, label: 'People in common' },
+  { pattern: /^\/api\/v1\/friendships\/show_many\/$/, label: 'Follow check' },
   { pattern: /^\/api\/v1\/friendships\/destroy\/(\d+)\/$/, label: 'Unfollow' },
   { pattern: /^\/api\/v1\/friendships\/create\/(\d+)\/$/, label: 'Follow' },
   { pattern: /^\/api\/v1\/friendships\/remove_follower\/(\d+)\/$/, label: 'Remove follower' },
@@ -17,7 +18,7 @@ export function describeEndpoint(endpoint: string): { label: string; targetPk: s
   for (const { pattern, label } of ENDPOINTS) {
     const match = pattern.exec(path);
     if (match) {
-      return { label, targetPk: OWN_ID_LABELS.has(label) ? null : match[1] };
+      return { label, targetPk: OWN_ID_LABELS.has(label) ? null : (match[1] ?? null) };
     }
   }
   return { label: path, targetPk: null };

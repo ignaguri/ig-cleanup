@@ -112,6 +112,23 @@ export function parseMutualsPage(res: IgRawResponse, endpoint: string): MutualPr
   };
 }
 
+// pk -> whether I follow them. Accounts that no longer exist are left out by Instagram.
+export function parseFollowStatuses(res: IgRawResponse, endpoint: string): Map<string, boolean> {
+  const body = parseBody(res, endpoint);
+  const statuses = body.friendship_statuses;
+  if (typeof statuses !== 'object' || statuses === null) {
+    throw new IgShapeError(endpoint, 'missing friendship_statuses', res);
+  }
+  return new Map(
+    Object.entries(statuses as Record<string, { following?: unknown }>).map(([pk, status]) => {
+      if (typeof status?.following !== 'boolean') {
+        throw new IgShapeError(endpoint, 'status without following', res);
+      }
+      return [pk, status.following];
+    }),
+  );
+}
+
 export function parseWriteResult(res: IgRawResponse, endpoint: string): void {
   const body = parseBody(res, endpoint);
   if (body.status !== 'ok') {

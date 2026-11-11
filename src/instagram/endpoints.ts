@@ -30,6 +30,11 @@ export function mutualsRequest(targetPk: string): IgRequest {
   };
 }
 
+// Read-only, but Instagram takes the ids in a POST body.
+export function followStatusRequest(pks: string[]): IgRequest {
+  return { method: 'POST', path: '/api/v1/friendships/show_many/', form: { user_ids: pks.join(',') } };
+}
+
 export function unfollowRequest(targetPk: string): IgRequest {
   return {
     method: 'POST',

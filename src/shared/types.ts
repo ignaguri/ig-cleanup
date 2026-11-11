@@ -23,6 +23,8 @@ export type Person = {
   // Missing on records from before rescans existed.
   seenInFollowersAt?: number;
   seenInFollowingAt?: number;
+  // When Instagram was last asked directly whether I follow them.
+  followCheckedAt?: number;
   unfollowedMe?: TimeWindow | null;
   startedFollowingMe?: TimeWindow | null;
 };
@@ -82,7 +84,6 @@ export type RescanState = {
   startedAt: number;
   previousAt: number;
   followersDiffSkipped?: boolean;
-  followingDiffSkipped?: boolean;
 };
 
 export type ScanSummary = {
@@ -92,9 +93,8 @@ export type ScanSummary = {
   following: number;
   lostFollowers: number;
   newFollowers: number;
-  // A list came back much shorter than stored, so nobody was marked as gone from it.
+  // The followers list came back much shorter than stored, so nobody was marked as gone from it.
   followersDiffSkipped: boolean;
-  followingDiffSkipped?: boolean;
 };
 
 export type Settings = { dailyCap: number; minDelayMs: number; maxDelayMs: number };

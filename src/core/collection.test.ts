@@ -75,7 +75,11 @@ describe('collectionProgress', () => {
 
   it('is in the lists phase until both cursors are done', () => {
     expect(collectionProgress(INITIAL_COLLECTION, []).phase).toBe('lists');
-    expect(collectionProgress({ ...INITIAL_COLLECTION, followers: doneCursor }, []).phase).toBe('lists');
+    const fan = person({ pk: 'fan', iFollow: false, followsMe: true });
+    expect(collectionProgress({ ...INITIAL_COLLECTION, followers: doneCursor }, [fan])).toMatchObject({
+      phase: 'lists',
+      followChecksLeft: 0,
+    });
   });
 
   it('reports mutuals phase with counts, then done', () => {
@@ -83,10 +87,18 @@ describe('collectionProgress', () => {
     expect(collectionProgress(listsDone, people)).toEqual({
       phase: 'mutuals',
       listsSeen: 20,
+      followChecksLeft: 0,
       mutualsDone: 1,
       mutualsTotal: 2,
     });
     expect(collectionProgress({ ...listsDone, mutualsCompletedAt: 5 }, people).phase).toBe('done');
+  });
+
+  it('stays in the lists phase while fans are unconfirmed', () => {
+    const fan = person({ pk: 'fan', iFollow: false, followsMe: true });
+    const progress = collectionProgress({ ...listsDone, mutualsCompletedAt: 5 }, [fan]);
+    expect(progress.phase).toBe('lists');
+    expect(progress.followChecksLeft).toBe(1);
   });
 });
 

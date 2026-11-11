@@ -7,12 +7,13 @@ import {
   followersRequest,
   followingRequest,
   followRequest,
+  followStatusRequest,
   mutualsRequest,
   removeFollowerRequest,
   unfollowRequest,
 } from './endpoints';
 import { IgBlockedError, IgRetryableError, IgShapeError } from './errors';
-import { type IgUser, parseMutualsPage, parseUserPage, parseWriteResult } from './parse';
+import { type IgUser, parseFollowStatuses, parseMutualsPage, parseUserPage, parseWriteResult } from './parse';
 import { type IgRawResponse, type IgRequest, igFetch, readSession } from './transport';
 
 type UserPage = { users: IgUser[]; nextMaxId: string | null };
@@ -116,6 +117,11 @@ export async function fetchFollowingPage(maxId: string | null): Promise<UserPage
 export async function fetchMutuals(pk: string): Promise<MutualPreview> {
   await requireSession('/api/v1/friendships/mutual_followers/');
   return send(mutualsRequest(pk), parseMutualsPage);
+}
+
+export async function fetchFollowStatuses(pks: string[]): Promise<Map<string, boolean>> {
+  await requireSession('/api/v1/friendships/show_many/');
+  return send(followStatusRequest(pks), parseFollowStatuses);
 }
 
 export async function unfollow(pk: string): Promise<void> {

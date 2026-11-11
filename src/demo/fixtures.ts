@@ -93,6 +93,7 @@ function makePerson(index: number, rand: () => number, now: number): Person {
     theyFollowedAt: followsMe && index % 4 !== 1 ? now - (200 + index * 5) * DAY : null,
     decision: 'undecided',
     decidedAt: null,
+    followCheckedAt: now,
   };
   if (fetchesMutuals(person) && index % 10 !== 9) {
     person.mutuals = mutualPreview(rand, index);

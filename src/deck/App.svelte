@@ -5,8 +5,8 @@ import { type CollectorHandle, startCollector } from '../collector/collector';
 import { checkAccount } from '../core/account-guard';
 import { collectionProgress, INITIAL_COLLECTION, nextListStep } from '../core/collection';
 import { availableDecisions } from '../core/decisions';
+import { awaitsFollowCheck } from '../core/follow-check';
 import { buildDeck, deckCounts, deckOf } from '../core/people';
-import { isUnsettledInRescan } from '../core/rescan';
 import { allPeople, getMeta, setMeta, wipeAll } from '../db/db';
 import { readSession, readUsername } from '../instagram/transport';
 import { IG_ORIGIN, META_ACCOUNT, META_BLOCK, META_COLLECTION, META_MODE, META_SCANS } from '../shared/constants';
@@ -33,7 +33,7 @@ import SettingsView from './components/SettingsView.svelte';
 import StatusFooter from './components/StatusFooter.svelte';
 import VoiceToggle from './components/VoiceToggle.svelte';
 import { decide, kick, undoLast } from './lib/decide';
-import { accountLabel } from './lib/format';
+import { accountLabel, formatCount } from './lib/format';
 import { type DeckCommand, keyToCommand } from './lib/keyboard';
 import { EXIT_MS } from './lib/motion';
 
@@ -73,10 +73,8 @@ let block = $state<BlockInfo | null>(null);
 let scans = $state<ScanSummary[]>([]);
 let collector: CollectorHandle | null = null;
 
-// People first seen in a rescan wait for the following list, or someone I follow back would look like a fan.
-const deckPeople = $derived(
-  people.filter((person) => !isUnsettledInRescan(person, collection.rescan, collection.following.done)),
-);
+const deckPeople = $derived(people.filter((person) => !awaitsFollowCheck(person)));
+const fansAwaitingCheck = $derived(people.filter(awaitsFollowCheck).length);
 const counts = $derived(deckCounts(deckPeople));
 const deck = $derived(buildDeck(deckPeople, selectedDeck));
 const current = $derived(deck[0] ?? null);
@@ -505,8 +503,14 @@ onMount(() => {
               <span class="flex h-12 w-12 items-center justify-center rounded-full bg-keep-tint text-keep">
                 <Icon name="check" size={22} />
               </span>
-              <p class="text-lg font-semibold">This deck is done</p>
-              <p class="max-w-xs text-sm text-muted">Pick another deck below, or press Z to bring back the last one.</p>
+              {#if selectedDeck === 'fansNotFollowed' && fansAwaitingCheck > 0}
+                <p class="text-lg font-semibold">{formatCount(fansAwaitingCheck)} still being confirmed</p>
+                <p class="max-w-xs text-sm text-muted">Instagram is being asked who you really don't follow.</p>
+                <button type="button" class="press btn btn-quiet" onclick={() => (view = 'collection')}>Go to Collection</button>
+              {:else}
+                <p class="text-lg font-semibold">This deck is done</p>
+                <p class="max-w-xs text-sm text-muted">Pick another deck below, or press Z to bring back the last one.</p>
+              {/if}
             </div>
           {/if}
           <div class="min-h-5" aria-live="polite">

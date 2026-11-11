@@ -4,6 +4,7 @@ import {
   followersRequest,
   followingRequest,
   followRequest,
+  followStatusRequest,
   mutualsRequest,
   removeFollowerRequest,
   unfollowRequest,
@@ -52,6 +53,16 @@ describe('list requests', () => {
       method: 'GET',
       path: '/api/v1/friendships/5/mutual_followers/',
       query: { page_size: '12' },
+    });
+  });
+});
+
+describe('follow status request', () => {
+  it('sends the ids comma separated', () => {
+    expect(followStatusRequest(['1', '2'])).toEqual({
+      method: 'POST',
+      path: '/api/v1/friendships/show_many/',
+      form: { user_ids: '1,2' },
     });
   });
 });
